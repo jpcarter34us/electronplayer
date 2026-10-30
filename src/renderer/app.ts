@@ -1,4 +1,5 @@
 import type { AudBackend, PlaybackState, Track } from '../shared/backend.js';
+import type { PlaybackSource, SendspinState } from '../shared/ma.js';
 import type { VisId, VisSettings } from '../shared/prefs.js';
 import { Html5Backend } from './backends/html5.js';
 import { NativeBackend } from './backends/native.js';
@@ -42,7 +43,31 @@ async function main(): Promise<void> {
     $('count').textContent = `${tracks.length} song${tracks.length === 1 ? '' : 's'}`;
   };
 
+  // Music Assistant (Sendspin) as the active source; see playback-source.ts.
+  let source: PlaybackSource = 'local';
+  let ma: SendspinState | undefined;
+
+  const renderMa = (m: SendspinState) => {
+    const elapsed = m.speed ? (Date.now() - m.progressAt) * m.speed : 0;
+    const time = m.durationMs ? Math.min(m.durationMs, m.progressMs + elapsed) : m.progressMs + elapsed;
+    $('title').textContent = [m.artist, m.title].filter(Boolean).join(' – ') || 'Music Assistant';
+    $('source').textContent = `Music Assistant${m.groupName ? ` · ${m.groupName}` : ''}${m.album ? ` · ${m.album}` : ''}`;
+    $('time').textContent = `${fmt(time)} / ${fmt(m.durationMs || -1)}`;
+    $('play').textContent = m.playing ? '⏸' : '▶';
+    seek.max = String(m.durationMs || 0);
+    $<HTMLInputElement>('volume').value = String(m.volume);
+    if (!seeking) seek.value = String(time);
+    const cover = $<HTMLImageElement>('cover');
+    if (m.artworkUrl && cover.getAttribute('src') !== m.artworkUrl) cover.src = m.artworkUrl;
+    cover.hidden = !m.artworkUrl;
+  };
+
   const renderState = () => {
+    const maActive = source === 'ma' && !!ma;
+    $('source').hidden = !maActive;
+    list.classList.toggle('inactive', maActive);
+    if (maActive) return renderMa(ma!);
+    $<HTMLImageElement>('cover').hidden = true;
     const t = tracks[state.position];
     $('title').textContent = t ? t.title : 'Audacious';
     $('time').textContent = `${fmt(state.time)} / ${fmt(state.length)}`;
@@ -52,6 +77,26 @@ async function main(): Promise<void> {
     if (!seeking) seek.value = String(state.time);
     list.querySelectorAll('li').forEach((li, i) => li.classList.toggle('current', i === state.position));
   };
+
+  const renderPairing = () => {
+    $('status').textContent = ma?.pairingCode
+      ? `Pair this player in Music Assistant with code ${ma.pairingCode}`
+      : 'Drop files here or click ⏏ · right-click a song to remove it';
+    $('status').classList.toggle('pairing', !!ma?.pairingCode);
+  };
+
+  if (native.available) {
+    const st = await window.audHost.maState();
+    source = st.source;
+    ma = st.sendspin;
+    $('library').hidden = false;
+    $('library').onclick = () => window.audHost.openWindow('music-assistant');
+    window.audHost.onSource((s) => { source = s; renderState(); });
+    window.audHost.onSendspinState((s) => { ma = s; renderPairing(); if (source === 'ma') renderState(); });
+    // Advance the time display between Music Assistant updates.
+    setInterval(() => source === 'ma' && ma?.playing && !seeking && renderState(), 250);
+    renderPairing();
+  }
 
   // Visualizations (native engine only): one canvas per enabled visualizer,
   // unless they are shown in separate windows (vis.ts).
@@ -83,7 +128,8 @@ async function main(): Promise<void> {
   });
 
   $('open').onclick = async () => backend.add(await window.audHost.openFiles());
-  $('play').onclick = () => (state.playing ? backend.pause() : backend.play());
+  // In Music Assistant mode pause() toggles the remote queue (playback-source.ts).
+  $('play').onclick = () => (source === 'ma' || state.playing ? backend.pause() : backend.play());
   $('stop').onclick = () => backend.stop();
   $('prev').onclick = () => backend.prev();
   $('next').onclick = () => backend.next();

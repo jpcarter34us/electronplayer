@@ -47,3 +47,19 @@ With the native engine, the menu bar follows upstream Audacious: File, Playback,
 - **Equalizer** (Output › Equalizer…, Cmd/Ctrl+E): 10 bands plus preamp, with presets saved to `eq.preset` like upstream.
 - **Effects** (Output › Effects…): the Plugins page's Effect tab.
 - **Visualizations** (View menu): Spectrum Analyzer, Blur Scope and VU Meter, drawn above the playlist. With View › Show Visualizations in Separate Windows (also on the Settings › Plugins › Visualization tab), each one opens in its own resizable window instead. You can keep those windows on top of other apps; closing one turns that visualizer off, and their positions are remembered.
+
+## Music Assistant
+
+The app can browse and play a [Music Assistant](https://www.music-assistant.io) library, and act as a Music Assistant speaker.
+
+1. In Music Assistant, create a long-lived token (your profile › Long-lived tokens).
+2. Open **Settings › Music Assistant**, enter the server address (e.g. `192.168.1.20` or `http://homeassistant.local:8095`) and the token, then click **Connect**. The token is stored encrypted in the macOS Keychain via Electron's `safeStorage`, never in plain text.
+3. **File › Music Assistant Library…** (Cmd/Ctrl+Shift+M), or the ♫ button, opens the browser: Artists, Albums, Tracks, Playlists, Radio, Podcasts, provider Browse and search. Each item has Play Now, Play Next and Add to Queue on the player chosen under **Play on**.
+
+**This computer as a speaker (Sendspin).** On by default once a server is set. The app joins Music Assistant as a player (named "Audacious (your computer)") using [Sendspin](https://www.sendspin-audio.com), Music Assistant's synchronized streaming protocol. The first time, Music Assistant may ask to pair it: the app shows a 6-digit code in Settings and in the main window, which you enter in Music Assistant.
+
+While Music Assistant plays here, the main window, the menus and the Touch Bar show and control its queue. Playing a local file pauses Music Assistant and hands control back.
+
+Notes:
+- Uses `@sendspin/sendspin-js` 5.0.0, the version Music Assistant's own web player uses. Music Assistant accepts it with its default **Allow legacy clients** setting; if you turn that off, this player (like the web player) can't connect.
+- Music Assistant audio plays through Web Audio, not the Audacious engine, so Audacious effects, the equalizer and the visualizers don't apply to it. Music Assistant sends 16-bit audio to Sendspin players.

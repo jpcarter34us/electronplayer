@@ -18,7 +18,7 @@ const api = {
   onEvent: (listener: (event: unknown) => void): (() => void) => on('aud:event', listener),
 
   /** Opens the Settings ("settings", page), Equalizer or a plugin's settings window. */
-  openWindow: (kind: 'settings' | 'equalizer' | 'plugin-prefs', arg?: string): Promise<void> =>
+  openWindow: (kind: 'settings' | 'equalizer' | 'plugin-prefs' | 'music-assistant', arg?: string): Promise<void> =>
     ipcRenderer.invoke('aud:open-window', kind, arg),
   pluginAbout: (id: string): Promise<void> => ipcRenderer.invoke('aud:plugin-about', id),
   /** Returns a file:// URI, or null if cancelled. */
@@ -32,6 +32,24 @@ const api = {
   setVis: (id: string, on: boolean): Promise<void> => ipcRenderer.invoke('aud:set-vis', id, on),
   setVisOption: (option: 'separate' | 'onTop', on: boolean): Promise<void> => ipcRenderer.invoke('aud:set-vis-option', option, on),
   onVisConfig: (listener: (settings: unknown) => void): (() => void) => on('aud:vis-config', listener),
+
+  // Music Assistant (see src/main/music-assistant.ts)
+  /** { settings, status, sendspin, source } */
+  maState: (): Promise<unknown> => ipcRenderer.invoke('aud:ma-state'),
+  /** Saves settings; a non-empty `token` replaces the stored one. */
+  maConfigure: (update: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('aud:ma-configure', update),
+  maForgetToken: (): Promise<void> => ipcRenderer.invoke('aud:ma-forget-token'),
+  maCommand: (command: string, args?: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('aud:ma-command', command, args ?? {}),
+  onMaStatus: (listener: (status: unknown) => void): (() => void) => on('aud:ma-status', listener),
+  onMaSettings: (listener: (settings: unknown) => void): (() => void) => on('aud:ma-settings', listener),
+  onMaEvent: (listener: (event: unknown) => void): (() => void) => on('aud:ma-event', listener),
+  onSendspinState: (listener: (state: unknown) => void): (() => void) => on('aud:sendspin-state', listener),
+  onSource: (listener: (source: string) => void): (() => void) => on('aud:source', listener),
+
+  // Hidden Sendspin host window only (src/renderer/sendspin-host.ts)
+  sendspinConfig: (): Promise<unknown> => ipcRenderer.invoke('aud:sendspin-config'),
+  sendspinState: (state: unknown): void => ipcRenderer.send('aud:sendspin-state', state),
+  onSendspinCommand: (listener: (command: unknown) => void): (() => void) => on('aud:sendspin-command', listener),
 };
 
 export type AudHostApi = typeof api;

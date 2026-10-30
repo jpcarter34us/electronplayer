@@ -1,4 +1,5 @@
 import type { Equalizer, EqPreset, PluginInfo } from '../shared/backend.js';
+import type { MaSettings, MaStatus, PlaybackSource, SendspinState } from '../shared/ma.js';
 import type { CfgType, PluginPrefsSession, PrefValue, VisId, VisSettings } from '../shared/prefs.js';
 
 /** The preload bridge (src/preload/preload.ts). */
@@ -10,7 +11,7 @@ declare global {
       pathForFile(file: File): string;
       call(method: string, ...args: unknown[]): Promise<unknown>;
       onEvent(listener: (event: unknown) => void): () => void;
-      openWindow(kind: 'settings' | 'equalizer' | 'plugin-prefs', arg?: string): Promise<void>;
+      openWindow(kind: 'settings' | 'equalizer' | 'plugin-prefs' | 'music-assistant', arg?: string): Promise<void>;
       pluginAbout(id: string): Promise<void>;
       choosePath(mode: 'file' | 'folder', current?: string): Promise<string | null>;
       onNavigate(listener: (hash: string) => void): () => void;
@@ -18,6 +19,15 @@ declare global {
       setVis(id: VisId, on: boolean): Promise<void>;
       setVisOption(option: 'separate' | 'onTop', on: boolean): Promise<void>;
       onVisConfig(listener: (settings: VisSettings) => void): () => void;
+      maState(): Promise<{ settings: MaSettings; status: MaStatus; sendspin: SendspinState; source: PlaybackSource }>;
+      maConfigure(update: Partial<Omit<MaSettings, 'hasToken'>> & { token?: string }): Promise<MaStatus>;
+      maForgetToken(): Promise<void>;
+      maCommand(command: string, args?: Record<string, unknown>): Promise<unknown>;
+      onMaStatus(listener: (status: MaStatus) => void): () => void;
+      onMaSettings(listener: (settings: MaSettings) => void): () => void;
+      onMaEvent(listener: (event: { event: string; object_id?: string; data?: unknown }) => void): () => void;
+      onSendspinState(listener: (state: SendspinState) => void): () => void;
+      onSource(listener: (source: PlaybackSource) => void): () => void;
     };
   }
 }

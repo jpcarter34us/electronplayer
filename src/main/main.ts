@@ -3,9 +3,10 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createAppMenu } from './menu';
 import { loadNativeCore, type NativeMethod } from './native';
+import { PlaybackSources, sendspinAsLocal } from './playback-source';
 import { createPlaybackTouchBar } from './touchbar';
 import { VisState } from './vis';
-import { openEqualizer, openPluginPrefs, openSettings } from './windows';
+import { openEqualizer, openMusicAssistant, openPluginPrefs, openSettings } from './windows';
 import type { PlaybackState, PluginInfo, Track } from '../shared/backend';
 import type { VisId, VisSettings } from '../shared/prefs';
 
@@ -19,8 +20,12 @@ const native = loadNativeCore(app.getPath('userData'), (event) => {
   // drawing visualizers (the main window, or the separate vis windows).
   const targets = event.type === 'vis' ? (vis?.targets(mainWindow) ?? []) : BrowserWindow.getAllWindows();
   for (const win of targets) if (!win.isDestroyed()) win.webContents.send('aud:event', event);
-  playbackTouchBar?.update(event);
+  sources.onNativeEvent(event);
+  if (sources.source === 'local') playbackTouchBar?.update(event);
 });
+
+// Local playback and Music Assistant (Sendspin); see playback-source.ts.
+const sources = new PlaybackSources(native.call);
 
 const vis = native.call
   ? new VisState(native.call, (config) => {
@@ -35,15 +40,33 @@ let appMenu: ReturnType<typeof createAppMenu> | undefined;
 function setUpTouchBar(): void {
   if (process.platform !== 'darwin' || !native.call) return;
   const call = native.call;
-  const touchBar = (playbackTouchBar = createPlaybackTouchBar(call));
-  // Catch up on events sent before the Touch Bar existed; resolves once the
-  // engine is running, without holding up the window.
-  Promise.all([call('getPlaylist', []), call('getState', [])])
-    .then(([tracks, state]) => {
-      touchBar.update({ type: 'playlist', tracks: tracks as Track[] });
-      touchBar.update({ type: 'state', state: state as PlaybackState });
-    })
-    .catch((err) => console.error('Touch Bar sync failed:', err));
+  // Buttons go to the active source (local or Music Assistant).
+  const touchBar = (playbackTouchBar = createPlaybackTouchBar(sources.call));
+  // Catch up on local state: now (events sent before the Touch Bar existed;
+  // resolves once the engine runs) and whenever local becomes the source.
+  const syncLocal = () =>
+    Promise.all([call('getPlaylist', []), call('getState', [])])
+      .then(([tracks, state]) => {
+        touchBar.update({ type: 'playlist', tracks: tracks as Track[] });
+        touchBar.update({ type: 'state', state: state as PlaybackState });
+      })
+      .catch((err) => console.error('Touch Bar sync failed:', err));
+  void syncLocal();
+
+  // While Music Assistant is the source, show its track and advancing time.
+  let ticker: NodeJS.Timeout | undefined;
+  const showMa = () => {
+    const view = sendspinAsLocal(sources.sendspin.state);
+    touchBar.update({ type: 'playlist', tracks: [{ uri: '', title: view.title, length: view.state.length }] });
+    touchBar.update({ type: 'state', state: view.state });
+  };
+  sources.onChange((source, state) => {
+    clearInterval(ticker);
+    if (source === 'ma') {
+      showMa();
+      if (state.playing) ticker = setInterval(showMa, 500);
+    } else void syncLocal();
+  });
 }
 
 function createWindow(): void {
@@ -85,13 +108,13 @@ ipcMain.handle('aud:open-files', async (event) => {
 
 ipcMain.handle('aud:native-info', () => native.info);
 
-ipcMain.handle('aud:call', (_event, method: NativeMethod, args: unknown[]) => {
-  if (!native.call) throw new Error('libaudcore is not loaded');
-  return native.call(method, Array.isArray(args) ? args : []);
-});
+// Transport methods follow the active source; the rest go to libaudcore.
+ipcMain.handle('aud:call', (_event, method: NativeMethod, args: unknown[]) =>
+  sources.call(method, Array.isArray(args) ? args : []));
 
 // Settings, equalizer and plugin-settings windows (native engine only).
 ipcMain.handle('aud:open-window', (event, kind: string, arg?: string) => {
+  if (kind === 'music-assistant') return void openMusicAssistant();
   if (!native.call) return;
   const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   if (kind === 'settings') openSettings(arg);
@@ -127,9 +150,10 @@ ipcMain.handle('aud:set-vis-option', (_event, option: 'separate' | 'onTop', on: 
 });
 
 app.whenReady().then(() => {
+  sources.start(); // needs safeStorage, which needs the app ready
   setUpTouchBar();
   if (native.call) {
-    appMenu = createAppMenu(native.call, vis!);
+    appMenu = createAppMenu(sources.call, vis!);
     // Both wait for the engine; neither holds up the window.
     vis!.load().then(() => appMenu!.refresh()).catch((err) => console.error('Menu setup failed:', err));
   }
@@ -140,7 +164,10 @@ app.whenReady().then(() => {
 });
 
 // Saves config and playlists and stops the engine thread.
-app.on('will-quit', () => native.shutdown?.());
+app.on('will-quit', () => {
+  sources.stop();
+  native.shutdown?.();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

@@ -141,7 +141,17 @@ Findings:
 - **Visualizations** come from a `Visualizer` the addon registers only while a visualizer is on. Frames (256 frequency bins, 512 PCM samples and per-channel peaks, about 30 per second) go to the main window, where canvas ports of cairo-spectrum, blur_scope and vumeter draw them. libaudcore's band math (`compute_log_xscale` / `compute_freq_band`) is ported exactly. A setting (`[electron] vis_separate`) moves each enabled visualizer into its own window, like qtui's floating vis docks. The main process then sends frames only to those windows. Closing a window turns that visualizer off, and window bounds and keep-on-top (`vis_on_top`) persist.
 - **Not ported yet:** the Qt-only Appearance page, recording settings and Record Stream, Open URL, the Services menu (`aud_plugin_menu_add` items), the log inspector, and the playlist-management, queue and song-info dialogs (phase 2).
 
-## 8. Risks and open questions
+## 8. Music Assistant integration
+
+Not part of upstream Audacious; added for this port.
+
+- **Library and control:** `src/main/ma-client.ts` speaks Music Assistant's WebSocket API (`/ws`) as `music-assistant/client` does: server info first, `auth` with a long-lived token (schema ≥ 28), commands by `message_id` with streamed `partial` results, events, reconnection with backoff. `music-assistant.ts` stores the address in `userData/music-assistant.json` and the token encrypted with `safeStorage`, and exposes an allowlist of read-only browse commands plus `player_queues/play_media` to the renderer.
+- **Speaker:** `@sendspin/sendspin-js` 5.0.0 (Apache-2.0; the version MA's frontend pins) runs in a hidden window (`sendspin.ts`, with background throttling off so audio scheduling stays accurate) and is bundled by esbuild (`scripts/bundle.mjs`). It connects to `ws://<server>:8927/sendspin` and handles Noise encryption, pairing by code, clock sync and Web Audio playback.
+- **One transport, two engines:** `playback-source.ts` makes whichever engine started playing last the active source. Transport calls from the main window, menus and Touch Bar are routed to it, and starting one pauses the other. Switching is edge-triggered on "started playing", so a stream winding down can't grab control back.
+- **Tested against:** a mock MA server for the API and the real aiosendspin 10.2.1 server for Sendspin, configured like Music Assistant's defaults (`allow_noncompliant_clients` on, as MA's "Allow legacy clients" sets it). Not yet tested against a real Music Assistant install.
+- **Limits:** MA audio bypasses libaudcore (no Audacious effects, EQ or visualizers). Routing it through libaudcore (e.g. sendspin-cpp as an input plugin) would trade away sync accuracy with other speakers.
+
+## 9. Risks and open questions
 - **Linux main loop**: the GLib backend uses the *global default* `GMainContext` (`g_timeout_add_full` in `mainloop.cc`). On Linux, Chromium's UI thread also uses that context, so the engine thread would compete with it. Plan: an upstream patch so libaudcore uses its own context (or a libuv `MainloopType`).
 - **Licensing**: shipping GPL plugins (e.g. ffaudio, sid, adplug) makes the distributed app GPL. Decide on the license for this repo early.
 - **Windows build**: upstream's Windows build uses MSYS2/MinGW. The addon must then be built with the same toolchain, or the core must be loaded dynamically through a C shim to avoid C++ ABI mismatches.

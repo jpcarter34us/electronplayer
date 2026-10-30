@@ -71,6 +71,95 @@ function titleFormat(store: PrefsStore, form: PrefsForm): HTMLElement {
 }
 
 let visUnsubscribe: (() => void) | undefined;
+let maUnsubscribe: (() => void)[] = [];
+
+// Music Assistant connection and the Sendspin player.
+async function musicAssistantPage(): Promise<HTMLElement> {
+  const { settings, status, sendspin } = await window.audHost.maState();
+  const row = (label: string, ...controls: (Node | string)[]) =>
+    h('div', { className: 'row' }, h('span', { className: 'row-label', textContent: label }), h('span', { className: 'row-control' }, ...controls));
+
+  const server = h('input', { type: 'text', value: settings.server, placeholder: '192.168.1.20 or http://homeassistant.local:8095', spellcheck: false });
+  const token = h('input', { type: 'password', autocomplete: 'off' });
+  const connect = h('button', { textContent: 'Connect', className: 'primary' });
+  const forget = h('button', { textContent: 'Forget Token' });
+  const statusLine = h('p', { className: 'ma-status' });
+
+  const enabled = h('input', { type: 'checkbox', checked: settings.sendspin });
+  const playerName = h('input', { type: 'text', value: settings.playerName });
+  const endpoint = h('input', { type: 'text', value: settings.sendspinUrl, spellcheck: false });
+  const saveSpeaker = h('button', { textContent: 'Apply' });
+  const speakerBox = h('fieldset', { className: 'children' },
+    h('div', { className: 'table' }, row('Player name:', playerName), row('Sendspin address:', endpoint)),
+    h('div', { className: 'row' }, saveSpeaker));
+  const pairing = h('div', { className: 'ma-pairing', hidden: true });
+  const speakerStatus = h('p', { className: 'ma-status' });
+
+  const renderSettings = (s: typeof settings) => {
+    token.placeholder = s.hasToken ? 'Stored securely; leave blank to keep it' : 'Paste a long-lived token from your Music Assistant profile';
+    forget.disabled = !s.hasToken;
+    speakerBox.disabled = !enabled.checked;
+  };
+  const renderStatus = (st: typeof status) => {
+    statusLine.dataset.state = st.state;
+    statusLine.textContent =
+      st.state === 'connected' ? `Connected to ${st.serverName || 'Music Assistant'}${st.serverVersion ? ` ${st.serverVersion}` : ''}`
+      : st.state === 'connecting' ? 'Connecting…'
+      : st.error ? `Not connected: ${st.error}` : 'Not connected';
+    endpoint.placeholder = settings.server ? 'Default: the server address, port 8927' : 'ws://host:8927/sendspin';
+  };
+  const renderSpeaker = (sp: typeof sendspin) => {
+    speakerStatus.dataset.state = sp.connection === 'connected' ? 'connected' : sp.connection === 'connecting' ? 'connecting' : 'disconnected';
+    speakerStatus.textContent =
+      !sp.enabled ? 'Off'
+      : sp.connection === 'connected' ? `Connected as a Music Assistant player${sp.playing ? ' · playing' : ''}${sp.groupName ? ` · ${sp.groupName}` : ''}`
+      : sp.connection === 'connecting' ? 'Connecting…'
+      : `Not connected${sp.error ? `: ${sp.error}` : ''}`;
+    pairing.hidden = !sp.pairingCode;
+    pairing.replaceChildren(h('span', { textContent: 'To pair this player, enter this code in Music Assistant:' }), h('strong', { textContent: sp.pairingCode ?? '' }));
+  };
+
+  connect.onclick = async () => {
+    connect.disabled = true;
+    try {
+      renderStatus(await window.audHost.maConfigure({ server: server.value, token: token.value }));
+      token.value = '';
+    } catch (err) {
+      statusLine.textContent = (err as Error).message;
+    } finally {
+      connect.disabled = false;
+    }
+  };
+  server.onkeydown = token.onkeydown = (e: KeyboardEvent) => e.key === 'Enter' && connect.click();
+  forget.onclick = () => window.audHost.maForgetToken();
+  enabled.onchange = () => {
+    speakerBox.disabled = !enabled.checked;
+    void window.audHost.maConfigure({ sendspin: enabled.checked });
+  };
+  saveSpeaker.onclick = () => window.audHost.maConfigure({ playerName: playerName.value, sendspinUrl: endpoint.value });
+
+  maUnsubscribe.forEach((u) => u());
+  maUnsubscribe = [
+    window.audHost.onMaSettings((s) => { Object.assign(settings, s); renderSettings(s); }),
+    window.audHost.onMaStatus(renderStatus),
+    window.audHost.onSendspinState(renderSpeaker),
+  ];
+  renderSettings(settings);
+  renderStatus(status);
+  renderSpeaker(sendspin);
+
+  return h('div', { className: 'prefs' },
+    h('div', { className: 'pref-label section', innerHTML: '<b>Server</b>' }),
+    h('p', { className: 'muted', textContent: 'Browse and play your Music Assistant library. Create a long-lived token in Music Assistant under your profile.' }),
+    h('div', { className: 'table' }, row('Server address:', server), row('Token:', token)),
+    h('div', { className: 'row' }, connect, forget, h('button', { textContent: 'Open Library…', onclick: () => window.audHost.openWindow('music-assistant') })),
+    statusLine,
+    h('div', { className: 'pref-label section', innerHTML: '<b>This computer as a speaker</b>' }),
+    h('label', { className: 'check' }, enabled, h('span', { textContent: 'Play Music Assistant audio on this computer (Sendspin)' })),
+    speakerBox,
+    pairing,
+    speakerStatus);
+}
 
 async function pluginsPage(tab: string): Promise<HTMLElement> {
   const bar = h('div', { className: 'tabs', role: 'tablist' });
@@ -157,6 +246,7 @@ async function show(hash: string): Promise<void> {
   for (const w of page.widgets) {
     if (w.custom === 'output-plugin') customs.set(w, await outputPlugin());
     if (w.custom === 'plugins') customs.set(w, await pluginsPage(tab));
+    if (w.custom === 'music-assistant') customs.set(w, await musicAssistantPage());
   }
   if (token !== showing) return; // a newer navigation won
 

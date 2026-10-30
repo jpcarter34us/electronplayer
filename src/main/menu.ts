@@ -4,7 +4,7 @@ import type { PlaybackState } from '../shared/backend';
 import type { VisId } from '../shared/prefs';
 import type { NativeMethod } from './native';
 import type { VisState } from './vis';
-import { openEqualizer, openSettings } from './windows';
+import { openEqualizer, openMusicAssistant, openSettings } from './windows';
 
 // The menu bar, following qtui's (audacious-plugins/src/qtui/menus.cc):
 // File, Playback, Playlist, Output, View. Playlist-management, queue and
@@ -80,6 +80,8 @@ export function createAppMenu(call: Call, vis: VisState): { refresh(): Promise<v
           { label: 'Open Folder…', accelerator: 'CmdOrCtrl+K', click: openOrAdd('open', true) },
           { label: 'Add Files…', accelerator: 'CmdOrCtrl+Shift+O', click: openOrAdd('add', false) },
           { label: 'Add Folder…', accelerator: 'CmdOrCtrl+Shift+K', click: openOrAdd('add', true) },
+          { type: 'separator' },
+          { label: 'Music Assistant Library…', accelerator: 'CmdOrCtrl+Shift+M', click: () => openMusicAssistant() },
           ...(isMac ? [] : [{ type: 'separator' } as const, settingsItem, { type: 'separator' } as const, { role: 'quit' } as const]),
         ],
       },

@@ -58,3 +58,8 @@ export function openEqualizer(): BrowserWindow {
 export function openPluginPrefs(id: string, parent?: BrowserWindow): BrowserWindow {
   return show(`prefs:${id}`, 'prefs.html', { width: 520, height: 480, minWidth: 360, minHeight: 200, parent }, id);
 }
+
+/** Music Assistant library browser. */
+export function openMusicAssistant(): BrowserWindow {
+  return show('music-assistant', 'music-assistant.html', { title: 'Music Assistant', width: 980, height: 680, minWidth: 640, minHeight: 420 });
+}

@@ -100,6 +100,7 @@ export const PAGES: SettingsPage[] = [
     ],
   },
   { id: 'plugins', title: 'Plugins', widgets: [{ type: 'custom', custom: 'plugins' }] },
+  { id: 'music-assistant', title: 'Music Assistant', widgets: [{ type: 'custom', custom: 'music-assistant' }] },
   {
     id: 'advanced',
     title: 'Advanced',
