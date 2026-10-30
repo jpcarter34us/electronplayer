@@ -52,9 +52,13 @@ With the native engine, the menu bar follows upstream Audacious: File, Playback,
 
 The app can browse and play a [Music Assistant](https://www.music-assistant.io) library, and act as a Music Assistant speaker.
 
-1. In Music Assistant, create a long-lived token (your profile › Long-lived tokens).
-2. Open **Settings › Music Assistant**, enter the server address (e.g. `192.168.1.20` or `http://homeassistant.local:8095`) and the token, then click **Connect**. The token is stored encrypted in the macOS Keychain via Electron's `safeStorage`, never in plain text.
-3. **File › Music Assistant Library…** (Cmd/Ctrl+Shift+M), or the ♫ button, opens the browser: Artists, Albums, Tracks, Playlists, Radio, Podcasts, provider Browse and search. Each item has Play Now, Play Next and Add to Queue on the player chosen under **Play on**.
+1. Open **Settings › Music Assistant** and enter the server address (e.g. `192.168.1.20` or `http://homeassistant.local:8095`).
+2. Sign in, as in the Music Assistant mobile app:
+   - with your Music Assistant **username and password**, or
+   - with **Sign in with Home Assistant…** (or another provider your server offers), which finishes in your browser.
+
+   Either way the app keeps only a session token, encrypted in the macOS Keychain, never your password. Session tokens renew themselves while used and expire after 90 days at most; the app then asks you to sign in again. **Sign Out** revokes the session on the server. A pasted long-lived token still works, under "Use a long-lived token instead".
+3. **File › Library…** (Cmd/Ctrl+Shift+M), or the ♫ button, opens the library: Artists, Albums, Tracks, Playlists, Radio, Podcasts, provider Browse and search. Each item has Play Now, Play Next and Add to Queue on the player chosen under **Play on**.
 
 **This computer as a speaker (Sendspin).** On by default once a server is set. The app joins Music Assistant as a player (named "Audacious (your computer)") using [Sendspin](https://www.sendspin-audio.com), Music Assistant's synchronized streaming protocol. The first time, Music Assistant may ask to pair it: the app shows a 6-digit code in Settings and in the main window, which you enter in Music Assistant.
 
@@ -63,3 +67,11 @@ While Music Assistant plays here, the main window, the menus and the Touch Bar s
 Notes:
 - Uses `@sendspin/sendspin-js` 5.0.0, the version Music Assistant's own web player uses. Music Assistant accepts it with its default **Allow legacy clients** setting; if you turn that off, this player (like the web player) can't connect.
 - Music Assistant audio plays through Web Audio, not the Audacious engine, so Audacious effects, the equalizer and the visualizers don't apply to it. Music Assistant sends 16-bit audio to Sendspin players.
+
+## OpenSubsonic (Navidrome and others)
+
+**Settings › Subsonic**: enter the server address (e.g. `http://navidrome.local:4533`) with your username and password, or an API key if your server supports OpenSubsonic API keys (the app tells you when it does). Credentials are stored encrypted in the Keychain. Requests use the salted-token scheme, never the plain password.
+
+In the Library window, switch the source to **Subsonic** for Artists, Albums, Recently Added, Playlists, Starred, Random Songs and search. Songs go into the Audacious playlist and play through the Audacious engine, so effects, the equalizer and visualizations apply. Plays are reported back to the server ("now playing", then a full play at half the song or 4 minutes).
+
+Subsonic puts credentials in every stream URL, and Audacious saves playlist URLs to disk, so saved playlists hold local addresses (`http://127.0.0.1:<port>/subsonic/<key>/…`) and a small proxy in the app adds your credentials to each request. Saved Subsonic songs therefore play only while the app is running.

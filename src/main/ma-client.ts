@@ -25,10 +25,15 @@ export interface MaEvent {
   data?: unknown;
 }
 
+export interface MaUser {
+  username: string;
+  display_name?: string;
+}
+
 export type MaStatus =
-  | { state: 'disconnected'; error?: string }
+  | { state: 'disconnected'; error?: string; authFailed?: boolean }
   | { state: 'connecting' }
-  | { state: 'connected'; server: MaServerInfo };
+  | { state: 'connected'; server: MaServerInfo; user?: MaUser };
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -58,6 +63,49 @@ export function httpBase(server: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
+/**
+ * Runs one command that needs no authentication (auth/login,
+ * auth/providers, auth/authorization_url) on its own short connection.
+ */
+export function maAnonymousCommand<T>(server: string, command: string, args: Record<string, unknown> = {}, timeoutMs = 15_000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl(server));
+    } catch {
+      return reject(new Error('Invalid server address'));
+    }
+    const message_id = randomUUID().replace(/-/g, '');
+    let gotInfo = false;
+    const done = (fn: () => void) => {
+      clearTimeout(timer);
+      ws.onclose = ws.onerror = ws.onmessage = null;
+      ws.close();
+      fn();
+    };
+    const timer = setTimeout(() => done(() => reject(new Error('Music Assistant did not answer'))), timeoutMs);
+    ws.onerror = () => done(() => reject(new Error(`Cannot reach ${wsUrl(server)}`)));
+    ws.onclose = () => done(() => reject(new Error('Connection closed')));
+    ws.onmessage = (msg) => {
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(String(msg.data));
+      } catch {
+        return;
+      }
+      if (!gotInfo) {
+        gotInfo = true;
+        if (typeof data.schema_version !== 'number') return done(() => reject(new Error('Not a Music Assistant server')));
+        ws.send(JSON.stringify({ message_id, command, args }));
+        return;
+      }
+      if (data.message_id !== message_id || data.partial) return;
+      if ('error_code' in data) done(() => reject(new Error(String(data.details ?? 'Request failed'))));
+      else done(() => resolve(data.result as T));
+    };
+  });
+}
+
 export class MaClient {
   private ws?: WebSocket;
   private pending = new Map<string, Pending>();
@@ -69,6 +117,8 @@ export class MaClient {
   constructor(
     private onStatus: (status: MaStatus) => void,
     private onEvent: (event: MaEvent) => void,
+    /** Sent with `auth`, so the sign-in is labelled in Music Assistant. */
+    private deviceName = '',
   ) {}
 
   get status(): MaStatus {
@@ -117,7 +167,7 @@ export class MaClient {
       const ws = (this.ws = new WebSocket(url));
       let handshake = true;
       let settled = false;
-      const fail = (error: string, retry: boolean) => {
+      const fail = (error: string, retry: boolean, authFailed = false) => {
         if (!settled) {
           settled = true;
           reject(new Error(error));
@@ -126,7 +176,7 @@ export class MaClient {
           this.ws = undefined;
           ws.close();
           this.failPending(new Error(error));
-          this.setStatus({ state: 'disconnected', error });
+          this.setStatus({ state: 'disconnected', error, authFailed });
           if (retry && !this.stopped) this.scheduleReconnect();
           else this.stopped = true;
         }
@@ -145,18 +195,23 @@ export class MaClient {
         handshake = false;
         const info = data as unknown as MaServerInfo;
         if (typeof info.schema_version !== 'number') return fail('Not a Music Assistant server', false);
+        let user: MaUser | undefined;
         try {
           if (info.schema_version >= 28) {
-            if (!this.token) return fail('This server needs a long-lived token (Music Assistant › Profile › Long-lived tokens)', false);
-            const ok = await this.send('auth', { token: this.token });
-            if (!ok) return fail('Authentication failed: invalid or expired token', false);
+            if (!this.token) return fail('Sign in to this Music Assistant server', false, true);
+            const result = await this.send<{ user?: MaUser } | boolean>('auth', {
+              token: this.token,
+              ...(this.deviceName ? { device_name: this.deviceName } : {}),
+            });
+            if (!result) return fail('Your sign-in has expired or was revoked. Sign in again.', false, true);
+            if (typeof result === 'object') user = result.user;
           }
         } catch (err) {
-          return fail(`Authentication failed: ${(err as Error).message}`, false);
+          return fail(`Your sign-in was not accepted (${(err as Error).message}). Sign in again.`, false, true);
         }
         settled = true;
         this.reconnectDelay = 1000;
-        this.setStatus({ state: 'connected', server: info });
+        this.setStatus({ state: 'connected', server: info, user });
         resolve(info);
       };
       ws.onerror = () => fail(`Cannot reach ${url}`, true);

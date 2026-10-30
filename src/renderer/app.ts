@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     source = st.source;
     ma = st.sendspin;
     $('library').hidden = false;
-    $('library').onclick = () => window.audHost.openWindow('music-assistant');
+    $('library').onclick = () => window.audHost.openWindow('library');
     window.audHost.onSource((s) => { source = s; renderState(); });
     window.audHost.onSendspinState((s) => { ma = s; renderPairing(); if (source === 'ma') renderState(); });
     // Advance the time display between Music Assistant updates.

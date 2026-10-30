@@ -73,6 +73,76 @@ function titleFormat(store: PrefsStore, form: PrefsForm): HTMLElement {
 let visUnsubscribe: (() => void) | undefined;
 let maUnsubscribe: (() => void)[] = [];
 
+let ssUnsubscribe: (() => void)[] = [];
+
+// OpenSubsonic servers (Navidrome, Gonic, ...).
+async function subsonicPage(): Promise<HTMLElement> {
+  const { settings, status } = await window.audHost.subsonicState();
+  const row = (label: string, ...controls: (Node | string)[]) =>
+    h('div', { className: 'row' }, h('span', { className: 'row-label', textContent: label }), h('span', { className: 'row-control' }, ...controls));
+
+  const server = h('input', { type: 'text', value: settings.server, placeholder: 'http://navidrome.local:4533', spellcheck: false });
+  const username = h('input', { type: 'text', value: settings.username, autocomplete: 'username', spellcheck: false });
+  const password = h('input', { type: 'password', autocomplete: 'current-password' });
+  const apiKey = h('input', { type: 'password', autocomplete: 'off', placeholder: 'An API key from your server' });
+  const connect = h('button', { textContent: 'Connect', className: 'primary' });
+  const signOut = h('button', { textContent: 'Sign Out' });
+  const openLibrary = h('button', { textContent: 'Open Library…', onclick: () => window.audHost.openWindow('library', 'subsonic') });
+  const statusLine = h('p', { className: 'ma-status' });
+  const hint = h('p', { className: 'muted' });
+  const keyBox = h('details', { className: 'ma-advanced' },
+    h('summary', { textContent: 'Use an API key instead (OpenSubsonic)' }),
+    h('div', { className: 'table' }, row('API key:', apiKey)));
+
+  const render = (st: typeof status, s = settings) => {
+    statusLine.dataset.state = st.state;
+    statusLine.textContent =
+      st.state === 'connected' ? `Connected to ${st.serverType ?? 'Subsonic'}${st.serverVersion ? ` ${st.serverVersion}` : ''} · signed in with ${st.auth}`
+      : st.state === 'connecting' ? 'Connecting…'
+      : st.error ? `Not connected: ${st.error}` : 'Not connected';
+    signOut.disabled = !(s.hasPassword || s.hasApiKey);
+    password.placeholder = s.hasPassword ? 'Stored securely; leave blank to keep it' : '';
+    if (s.hasApiKey) apiKey.placeholder = 'Stored securely; leave blank to keep it';
+    hint.textContent = st.state === 'connected' && st.apiKeySupported && !s.hasApiKey
+      ? 'This server supports API keys. Using one means your password is not kept on this computer.'
+      : '';
+  };
+
+  connect.onclick = async () => {
+    connect.disabled = true;
+    try {
+      render(await window.audHost.subsonicConfigure({ server: server.value, username: username.value, password: password.value, apiKey: apiKey.value }));
+      password.value = apiKey.value = '';
+    } catch (err) {
+      statusLine.textContent = (err as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    } finally {
+      connect.disabled = false;
+    }
+  };
+  for (const input of [server, username, password, apiKey]) {
+    input.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') connect.click();
+    };
+  }
+  signOut.onclick = () => window.audHost.subsonicSignOut();
+
+  ssUnsubscribe.forEach((u) => u());
+  ssUnsubscribe = [
+    window.audHost.onSubsonicSettings((s) => { Object.assign(settings, s); render(status, s); }),
+    window.audHost.onSubsonicStatus((st) => { Object.assign(status, st); render(st); }),
+  ];
+  render(status);
+
+  return h('div', { className: 'prefs' },
+    h('div', { className: 'pref-label section', innerHTML: '<b>Server</b>' }),
+    h('p', { className: 'muted', textContent: 'Browse and play an OpenSubsonic or Subsonic server, such as Navidrome. Songs play in Audacious, so effects, the equalizer and visualizations apply.' }),
+    h('div', { className: 'table' }, row('Server address:', server), row('Username:', username), row('Password:', password)),
+    keyBox,
+    h('div', { className: 'row' }, connect, signOut, openLibrary),
+    statusLine,
+    hint);
+}
+
 // Music Assistant connection and the Sendspin player.
 async function musicAssistantPage(): Promise<HTMLElement> {
   const { settings, status, sendspin } = await window.audHost.maState();
@@ -80,11 +150,93 @@ async function musicAssistantPage(): Promise<HTMLElement> {
     h('div', { className: 'row' }, h('span', { className: 'row-label', textContent: label }), h('span', { className: 'row-control' }, ...controls));
 
   const server = h('input', { type: 'text', value: settings.server, placeholder: '192.168.1.20 or http://homeassistant.local:8095', spellcheck: false });
-  const token = h('input', { type: 'password', autocomplete: 'off' });
-  const connect = h('button', { textContent: 'Connect', className: 'primary' });
-  const forget = h('button', { textContent: 'Forget Token' });
   const statusLine = h('p', { className: 'ma-status' });
+  const busy = (button: HTMLButtonElement, work: () => Promise<unknown>) => async () => {
+    button.disabled = true;
+    try {
+      await work();
+    } catch (err) {
+      statusLine.dataset.state = 'disconnected';
+      statusLine.textContent = (err as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    } finally {
+      button.disabled = false;
+    }
+  };
 
+  // Signed in
+  const signOut = h('button', { textContent: 'Sign Out' });
+  signOut.onclick = busy(signOut, () => window.audHost.maSignOut());
+  const openLibrary = h('button', { textContent: 'Open Library…', onclick: () => window.audHost.openWindow('library', 'ma') });
+  const signedInBox = h('div', { className: 'row' }, signOut, openLibrary);
+
+  // Signing in: username/password, providers (Home Assistant...), or a long-lived token
+  const username = h('input', { type: 'text', autocomplete: 'username', spellcheck: false });
+  const password = h('input', { type: 'password', autocomplete: 'current-password' });
+  const signIn = h('button', { textContent: 'Sign In', className: 'primary' });
+  signIn.onclick = busy(signIn, async () => {
+    renderStatus(await window.audHost.maLogin(server.value, username.value, password.value));
+    password.value = '';
+  });
+  password.onkeydown = username.onkeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') signIn.click();
+  };
+  const providerRow = h('div', { className: 'row' });
+  const token = h('input', { type: 'password', autocomplete: 'off', placeholder: 'Paste a long-lived token from your Music Assistant profile' });
+  const connect = h('button', { textContent: 'Connect' });
+  connect.onclick = busy(connect, async () => {
+    renderStatus(await window.audHost.maConfigure({ server: server.value, token: token.value }));
+    token.value = '';
+  });
+  token.onkeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') connect.click();
+  };
+  const tokenBox = h('details', { className: 'ma-advanced' },
+    h('summary', { textContent: 'Use a long-lived token instead' }),
+    h('div', { className: 'table' }, row('Token:', token)),
+    h('div', { className: 'row' }, connect));
+  const signInBox = h('div', { className: 'prefs' },
+    h('div', { className: 'table' }, row('Username:', username), row('Password:', password)),
+    h('div', { className: 'row' }, signIn),
+    providerRow,
+    tokenBox);
+
+  // Offer the server's other sign-in methods (e.g. Home Assistant) once it is known.
+  let providersFor = '';
+  const loadProviders = async () => {
+    const address = server.value.trim();
+    if (!address || address === providersFor) return;
+    providersFor = address;
+    providerRow.replaceChildren();
+    const providers = await window.audHost.maProviders(address).catch(() => []);
+    if (server.value.trim() !== address) return;
+    providerRow.replaceChildren(...providers.map((p) => {
+      const b = h('button', { textContent: `Sign in with ${p.label}…` });
+      b.onclick = busy(b, async () => {
+        statusLine.dataset.state = 'connecting';
+        statusLine.textContent = `Finish signing in with ${p.label} in your browser…`;
+        renderStatus(await window.audHost.maLoginBrowser(server.value, p.id));
+      });
+      return b;
+    }));
+  };
+  let providerTimer: number | undefined;
+  server.oninput = () => {
+    clearTimeout(providerTimer);
+    providerTimer = window.setTimeout(() => void loadProviders(), 600);
+  };
+  server.onchange = () => void loadProviders();
+
+  const renderStatus = (st: typeof status) => {
+    const signedIn = st.state === 'connected';
+    signedInBox.hidden = !signedIn;
+    signInBox.hidden = signedIn || st.state === 'connecting';
+    statusLine.dataset.state = st.state;
+    statusLine.textContent =
+      signedIn ? `Signed in${st.user ? ` as ${st.user}` : ''} · ${st.serverName || 'Music Assistant'}${st.serverVersion ? ` ${st.serverVersion}` : ''}${settings.tokenKind === 'long-lived' ? ' (long-lived token)' : ''}`
+      : st.state === 'connecting' ? 'Connecting…'
+      : st.error ?? 'Not signed in';
+    if (!signedIn) void loadProviders();
+  };
   const enabled = h('input', { type: 'checkbox', checked: settings.sendspin });
   const playerName = h('input', { type: 'text', value: settings.playerName });
   const endpoint = h('input', { type: 'text', value: settings.sendspinUrl, spellcheck: false });
@@ -92,22 +244,10 @@ async function musicAssistantPage(): Promise<HTMLElement> {
   const speakerBox = h('fieldset', { className: 'children' },
     h('div', { className: 'table' }, row('Player name:', playerName), row('Sendspin address:', endpoint)),
     h('div', { className: 'row' }, saveSpeaker));
+  speakerBox.disabled = !enabled.checked;
   const pairing = h('div', { className: 'ma-pairing', hidden: true });
   const speakerStatus = h('p', { className: 'ma-status' });
 
-  const renderSettings = (s: typeof settings) => {
-    token.placeholder = s.hasToken ? 'Stored securely; leave blank to keep it' : 'Paste a long-lived token from your Music Assistant profile';
-    forget.disabled = !s.hasToken;
-    speakerBox.disabled = !enabled.checked;
-  };
-  const renderStatus = (st: typeof status) => {
-    statusLine.dataset.state = st.state;
-    statusLine.textContent =
-      st.state === 'connected' ? `Connected to ${st.serverName || 'Music Assistant'}${st.serverVersion ? ` ${st.serverVersion}` : ''}`
-      : st.state === 'connecting' ? 'Connecting…'
-      : st.error ? `Not connected: ${st.error}` : 'Not connected';
-    endpoint.placeholder = settings.server ? 'Default: the server address, port 8927' : 'ws://host:8927/sendspin';
-  };
   const renderSpeaker = (sp: typeof sendspin) => {
     speakerStatus.dataset.state = sp.connection === 'connected' ? 'connected' : sp.connection === 'connecting' ? 'connecting' : 'disconnected';
     speakerStatus.textContent =
@@ -119,23 +259,6 @@ async function musicAssistantPage(): Promise<HTMLElement> {
     pairing.replaceChildren(h('span', { textContent: 'To pair this player, enter this code in Music Assistant:' }), h('strong', { textContent: sp.pairingCode ?? '' }));
   };
 
-  connect.onclick = async () => {
-    connect.disabled = true;
-    try {
-      renderStatus(await window.audHost.maConfigure({ server: server.value, token: token.value }));
-      token.value = '';
-    } catch (err) {
-      statusLine.textContent = (err as Error).message;
-    } finally {
-      connect.disabled = false;
-    }
-  };
-  // Block body: an on* handler that returns false cancels the key, which
-  // would stop Cmd+V (and every other shortcut) reaching the Edit menu.
-  server.onkeydown = token.onkeydown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') connect.click();
-  };
-  forget.onclick = () => window.audHost.maForgetToken();
   enabled.onchange = () => {
     speakerBox.disabled = !enabled.checked;
     void window.audHost.maConfigure({ sendspin: enabled.checked });
@@ -144,20 +267,20 @@ async function musicAssistantPage(): Promise<HTMLElement> {
 
   maUnsubscribe.forEach((u) => u());
   maUnsubscribe = [
-    window.audHost.onMaSettings((s) => { Object.assign(settings, s); renderSettings(s); }),
+    window.audHost.onMaSettings((s) => Object.assign(settings, s)),
     window.audHost.onMaStatus(renderStatus),
     window.audHost.onSendspinState(renderSpeaker),
   ];
-  renderSettings(settings);
   renderStatus(status);
   renderSpeaker(sendspin);
 
   return h('div', { className: 'prefs' },
     h('div', { className: 'pref-label section', innerHTML: '<b>Server</b>' }),
-    h('p', { className: 'muted', textContent: 'Browse and play your Music Assistant library. Create a long-lived token in Music Assistant under your profile.' }),
-    h('div', { className: 'table' }, row('Server address:', server), row('Token:', token)),
-    h('div', { className: 'row' }, connect, forget, h('button', { textContent: 'Open Library…', onclick: () => window.audHost.openWindow('music-assistant') })),
+    h('p', { className: 'muted', textContent: 'Browse and play your Music Assistant library. Sign in with your Music Assistant account; only a session token is kept (in the Keychain), never your password.' }),
+    h('div', { className: 'table' }, row('Server address:', server)),
     statusLine,
+    signedInBox,
+    signInBox,
     h('div', { className: 'pref-label section', innerHTML: '<b>This computer as a speaker</b>' }),
     h('label', { className: 'check' }, enabled, h('span', { textContent: 'Play Music Assistant audio on this computer (Sendspin)' })),
     speakerBox,
@@ -251,6 +374,7 @@ async function show(hash: string): Promise<void> {
     if (w.custom === 'output-plugin') customs.set(w, await outputPlugin());
     if (w.custom === 'plugins') customs.set(w, await pluginsPage(tab));
     if (w.custom === 'music-assistant') customs.set(w, await musicAssistantPage());
+    if (w.custom === 'subsonic') customs.set(w, await subsonicPage());
   }
   if (token !== showing) return; // a newer navigation won
 

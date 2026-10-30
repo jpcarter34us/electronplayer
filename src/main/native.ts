@@ -10,7 +10,7 @@ export interface NativeInfo {
 /** Backend methods the renderer may invoke over IPC. */
 export const NATIVE_METHODS = [
   'play', 'pause', 'stop', 'next', 'prev', 'seek', 'setVolume',
-  'add', 'open', 'remove', 'clear', 'getPlaylist', 'getState', 'listPlugins',
+  'add', 'open', 'insert', 'remove', 'clear', 'getPlaylist', 'getState', 'listPlugins',
   'getConfig', 'setConfig', 'enablePlugin', 'pluginAbout', 'command',
   'openPrefs', 'prefsGet', 'prefsSet', 'prefsButton', 'prefsApply', 'closePrefs',
   'getEqualizer', 'setEqualizer', 'getEqPresets', 'saveEqPresets', 'visEnable',

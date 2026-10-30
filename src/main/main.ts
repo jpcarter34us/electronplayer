@@ -5,9 +5,10 @@ import { installContextMenu } from './context-menu';
 import { createAppMenu } from './menu';
 import { loadNativeCore, type NativeMethod } from './native';
 import { PlaybackSources, sendspinAsLocal } from './playback-source';
+import { setUpSubsonic } from './subsonic-playback';
 import { createPlaybackTouchBar } from './touchbar';
 import { VisState } from './vis';
-import { openEqualizer, openMusicAssistant, openPluginPrefs, openSettings } from './windows';
+import { openEqualizer, openLibrary, openPluginPrefs, openSettings } from './windows';
 import type { PlaybackState, PluginInfo, Track } from '../shared/backend';
 import type { VisId, VisSettings } from '../shared/prefs';
 
@@ -24,11 +25,14 @@ const native = loadNativeCore(app.getPath('userData'), (event) => {
   const targets = event.type === 'vis' ? (vis?.targets(mainWindow) ?? []) : BrowserWindow.getAllWindows();
   for (const win of targets) if (!win.isDestroyed()) win.webContents.send('aud:event', event);
   sources.onNativeEvent(event);
+  subsonicPlayback.onNativeEvent(event);
   if (sources.source === 'local') playbackTouchBar?.update(event);
 });
 
 // Local playback and Music Assistant (Sendspin); see playback-source.ts.
 const sources = new PlaybackSources(native.call);
+// OpenSubsonic servers (Navidrome, ...), played through libaudcore.
+const subsonicPlayback = setUpSubsonic(native.call);
 
 const vis = native.call
   ? new VisState(native.call, (config) => {
@@ -117,7 +121,7 @@ ipcMain.handle('aud:call', (_event, method: NativeMethod, args: unknown[]) =>
 
 // Settings, equalizer and plugin-settings windows (native engine only).
 ipcMain.handle('aud:open-window', (event, kind: string, arg?: string) => {
-  if (kind === 'music-assistant') return void openMusicAssistant();
+  if (kind === 'library') return void openLibrary(arg);
   if (!native.call) return;
   const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   if (kind === 'settings') openSettings(arg);
@@ -154,6 +158,7 @@ ipcMain.handle('aud:set-vis-option', (_event, option: 'separate' | 'onTop', on: 
 
 app.whenReady().then(() => {
   sources.start(); // needs safeStorage, which needs the app ready
+  void subsonicPlayback.subsonic.start();
   setUpTouchBar();
   if (native.call) {
     appMenu = createAppMenu(sources.call, vis!);
@@ -169,6 +174,7 @@ app.whenReady().then(() => {
 // Saves config and playlists and stops the engine thread.
 app.on('will-quit', () => {
   sources.stop();
+  subsonicPlayback.subsonic.stop();
   native.shutdown?.();
 });
 

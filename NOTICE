@@ -1,0 +1,21 @@
+Audacious for Electron
+
+This project ports and depends on third-party work:
+
+- Audacious and Audacious plugins (vendor/audacious, vendor/audacious-plugins)
+  Copyright Audacious developers. BSD-2-Clause (core); plugins under their
+  own licenses (BSD, GPL, LGPL). See each repository's COPYING/LICENSE.
+
+- Music Assistant sign-in flow (src/main/music-assistant.ts, src/main/ma-client.ts)
+  Adapted from the Music Assistant mobile app,
+  https://github.com/music-assistant/mobile-app
+  (composeApp/src/commonMain/kotlin/io/music_assistant/client/auth/AuthenticationManager.kt,
+  api/Request.kt). Copyright Music Assistant contributors. Licensed under the
+  Apache License, Version 2.0. Re-implemented in TypeScript; the desktop app
+  returns from browser sign-in through a loopback address instead of the
+  mobile app's custom URL scheme.
+
+- @sendspin/sendspin-js, Copyright Sendspin Protocol Authors.
+  Licensed under the Apache License, Version 2.0.
+
+A copy of the Apache License 2.0 is at https://www.apache.org/licenses/LICENSE-2.0

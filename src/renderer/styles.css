@@ -104,6 +104,8 @@ hr.vertical { border-top: 0; border-left: 1px solid rgb(127 127 127 / .3); width
 .ma-status[data-state=connected]::before { color: #3fb950; }
 .ma-status[data-state=connecting]::before { color: #d29922; }
 .ma-pairing { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 6px; }
+.ma-advanced summary { cursor: pointer; color: var(--muted); margin: 4px 0; }
+.ma-advanced[open] { display: flex; flex-direction: column; gap: 8px; }
 .ma-pairing strong { font-size: 20px; letter-spacing: 3px; font-variant-numeric: tabular-nums; }
 
 /* Equalizer */
@@ -129,7 +131,11 @@ hr.vertical { border-top: 0; border-left: 1px solid rgb(127 127 127 / .3); width
 .statusbar #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar button { font-size: 12px; color: var(--muted); }
 
-/* Music Assistant browser */
+/* Library browser */
+.lib-sources { display: flex; gap: 2px; padding: 2px; margin-bottom: 10px; border-radius: 6px; background: rgb(127 127 127 / .15); }
+.lib-sources button { flex: 1; font-size: 11px; padding: 4px 2px !important; border-radius: 4px !important; background: none !important; border: 0 !important; color: var(--muted); }
+.lib-sources button[aria-selected=true] { background: var(--bg) !important; color: var(--text); }
+#nav-sections { display: flex; flex-direction: column; gap: 2px; }
 .ma { gap: 0; }
 .ma-top { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel); }
 .ma-top #back { font-size: 18px; line-height: 1; padding: 2px 10px; }

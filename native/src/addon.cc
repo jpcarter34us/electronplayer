@@ -890,6 +890,60 @@ Napi::Value Open (const Napi::CallbackInfo & info)
     });
 }
 
+// insert(entries: {uri, title?, artist?, album?, length?}[], at = -1, play = false)
+// Known metadata goes in as a valid tuple, so the playlist shows it without
+// probing each entry (which for network sources means a request per track).
+// Returns the position of the first inserted entry.
+Napi::Value Insert (const Napi::CallbackInfo & info)
+{
+    struct Entry { std::string uri, title, artist, album; int length; };
+    std::vector<Entry> entries;
+    if (info.Length () > 0 && info[0].IsArray ())
+    {
+        auto a = info[0].As<Napi::Array> ();
+        for (uint32_t i = 0; i < a.Length (); i++)
+        {
+            if (!a.Get (i).IsObject ())
+                continue;
+            auto o = a.Get (i).As<Napi::Object> ();
+            auto str_field = [&] (const char * key) {
+                auto v = o.Get (key);
+                return v.IsString () ? v.As<Napi::String> ().Utf8Value () : std::string ();
+            };
+            auto len = o.Get ("length");
+            entries.push_back ({str_field ("uri"), str_field ("title"), str_field ("artist"), str_field ("album"),
+                                len.IsNumber () ? len.As<Napi::Number> ().Int32Value () : -1});
+        }
+    }
+    int at = (info.Length () > 1 && info[1].IsNumber ()) ? info[1].As<Napi::Number> ().Int32Value () : -1;
+    bool play = info.Length () > 2 && info[2].ToBoolean ().Value ();
+
+    return call (info.Env (), [entries, at, play] () {
+        auto pl = Playlist::active_playlist ();
+        int pos = (at < 0 || at > pl.n_entries ()) ? pl.n_entries () : at;
+        Index<PlaylistAddItem> items;
+        for (auto & e : entries)
+        {
+            Tuple tuple;
+            if (!e.title.empty ())
+            {
+                tuple.set_filename (e.uri.c_str ());
+                tuple.set_str (Tuple::Title, e.title.c_str ());
+                if (!e.artist.empty ())
+                    tuple.set_str (Tuple::Artist, e.artist.c_str ());
+                if (!e.album.empty ())
+                    tuple.set_str (Tuple::Album, e.album.c_str ());
+                if (e.length > 0)
+                    tuple.set_int (Tuple::Length, e.length);
+                tuple.set_state (Tuple::Valid);
+            }
+            items.append (String (e.uri.c_str ()), std::move (tuple));
+        }
+        pl.insert_items (pos, std::move (items), play);
+        return [pos] (Napi::Env env) -> Napi::Value { return Napi::Number::New (env, pos); };
+    });
+}
+
 Napi::Value Remove (const Napi::CallbackInfo & info)
 {
     auto positions = int_array (info.Length () > 0 ? info[0] : info.Env ().Undefined ());
@@ -1238,6 +1292,7 @@ Napi::Object InitModule (Napi::Env env, Napi::Object exports)
     exports.Set ("add", Napi::Function::New (env, Add));
     exports.Set ("remove", Napi::Function::New (env, Remove));
     exports.Set ("open", Napi::Function::New (env, Open));
+    exports.Set ("insert", Napi::Function::New (env, Insert));
     exports.Set ("clear", Napi::Function::New (env, Clear));
     exports.Set ("getPlaylist", Napi::Function::New (env, GetPlaylist));
     exports.Set ("getState", Napi::Function::New (env, GetState));

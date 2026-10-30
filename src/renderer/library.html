@@ -2,23 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <!-- Artwork comes from the Music Assistant server or the providers' image hosts. -->
+  <!-- Artwork comes from the Music Assistant server, the providers' image hosts or the local Subsonic proxy. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; img-src 'self' http: https: data:">
-  <title>Music Assistant</title>
+  <title>Library</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="window ma">
   <header class="ma-top">
     <button id="back" title="Back" aria-label="Back">‹</button>
     <h1 id="title"></h1>
-    <input id="search" type="search" placeholder="Search Music Assistant" aria-label="Search Music Assistant">
-    <label class="ma-player">Play on <select id="player" aria-label="Play on"></select></label>
+    <input id="search" type="search" placeholder="Search" aria-label="Search">
+    <span id="target"></span>
   </header>
   <div class="ma-body">
-    <nav id="nav" aria-label="Library"></nav>
+    <nav id="nav" aria-label="Library">
+      <div id="sources" class="lib-sources" role="tablist" aria-label="Source"></div>
+      <div id="nav-sections"></div>
+    </nav>
     <section id="content"></section>
   </div>
   <div id="toast" role="status" hidden></div>
-  <script type="module" src="music-assistant.js"></script>
+  <script type="module" src="library.js"></script>
 </body>
 </html>

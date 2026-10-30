@@ -143,6 +143,12 @@ export class PlaybackSources {
       return this.ma.configure(clean);
     });
     ipcMain.handle('aud:ma-forget-token', () => this.ma.forgetToken());
+    ipcMain.handle('aud:ma-sign-out', () => this.ma.signOut());
+    ipcMain.handle('aud:ma-providers', (_e, server: string) => this.ma.loginProviders(String(server ?? '')));
+    ipcMain.handle('aud:ma-login', (_e, server: string, username: string, password: string) =>
+      this.ma.loginWithPassword(String(server ?? ''), String(username ?? ''), String(password ?? '')));
+    ipcMain.handle('aud:ma-login-browser', (_e, server: string, providerId: string) =>
+      this.ma.loginWithBrowser(String(server ?? ''), String(providerId ?? '')));
     ipcMain.handle('aud:ma-command', (_e, command: string, args: Record<string, unknown>) =>
       this.ma.command(String(command), args && typeof args === 'object' ? args : {}));
   }

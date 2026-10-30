@@ -12,11 +12,24 @@ export interface MaSettings {
   playerName: string;
   /** Override for the Sendspin endpoint; default ws://<server host>:8927/sendspin. */
   sendspinUrl: string;
+  /** What the stored token is: a sign-in session (renews itself) or a pasted long-lived token. */
+  tokenKind: '' | 'session' | 'long-lived';
+}
+
+/** A sign-in provider other than username/password (e.g. Home Assistant). */
+export interface MaLoginProvider {
+  id: string;
+  type: string;
+  label: string;
 }
 
 export interface MaStatus {
   state: 'disconnected' | 'connecting' | 'connected';
   error?: string;
+  /** Not signed in, or the sign-in expired or was revoked. */
+  needsSignIn?: boolean;
+  /** Signed-in user's display name. */
+  user?: string;
   serverName?: string;
   serverVersion?: string;
   schemaVersion?: number;
