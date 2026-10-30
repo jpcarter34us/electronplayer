@@ -16,6 +16,7 @@ The approach, the per-plugin porting matrix and the roadmap are in [docs/PORTING
 | `src/shared/` | Types shared by main and renderer: `AudBackend` (`backend.ts`) and settings widget trees (`prefs.ts`) |
 | `src/main/` | Electron main process: native loader, menu bar (`menu.ts`), secondary windows (`windows.ts`), Touch Bar controls (`touchbar.ts`) |
 | `src/preload/` | `contextBridge` API exposed to the UI |
+| `resources/` | App icon: `icon.svg` (source), `icon.icns` and `icon.png` (made by `npm run icon`) |
 | `src/renderer/` | UI. `backends/native.ts` talks to libaudcore over IPC; `backends/html5.ts` is the fallback when the addon isn't built. Settings (`settings.ts`), plugin settings (`prefs.ts`, drawn by `prefs-form.ts`), Equalizer (`equalizer.ts`) and visualizers (`visualizers.ts`). |
 
 ## Run
@@ -70,7 +71,7 @@ What the build is:
 - **The Apple Silicon build was checked, not run.** It was built on an Intel Mac, which cannot run arm64 code, so nothing played audio in it here. Every binary was checked to be arm64, to point only inside the app, and to be signed. The Intel build was launched and played WAV, MP3, FLAC and Ogg.
 - **No SID plugin on Apple Silicon (C64 music).** Homebrew's current libsidplayfp (3.x) is built without the ReSIDfp engine the plugin needs. The Intel build has SID only because this Mac still has libsidplayfp 2.x. Updating Homebrew would drop it there too.
 - **Keychain prompt.** The first time the app saves a sign-in (Music Assistant or Subsonic), macOS asks to let ElectronPlayer use its "ElectronPlayer Safe Storage" key. Choose **Always Allow**. Because each ad-hoc build has a new signature, a rebuilt app may ask again.
-- **No app icon yet** (Electron's default is used).
+- **App icon.** `resources/icon.svg` is the source. After editing it, run `npm run icon` to regenerate `resources/icon.png` (the dock icon when running with `npm start`) and `resources/icon.icns` (the app's icon). Electron renders the SVG, so no extra tools are needed.
 - The SID plugin looks for optional C64 ROM files and a song-length database at a fixed build-time path, so it can't find them in the app (as before, without them SID files still play).
 
 ## Touch Bar

@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "build:audacious": "bash scripts/build-audacious.sh",
     "build:native": "cd native && node-gyp rebuild --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers",
+    "icon": "electron scripts/make-icon.cjs",
     "dist:mac": "bash scripts/package-mac.sh",
     "dist:mac:x64": "bash scripts/package-mac.sh x64",
     "dist:mac:arm64": "bash scripts/package-mac.sh arm64"
@@ -66,6 +67,7 @@
         "zip"
       ],
       "category": "public.app-category.music",
+      "icon": "resources/icon.icns",
       "identity": null,
       "hardenedRuntime": false,
       "artifactName": "${productName}-${version}-${arch}.${ext}"

@@ -165,6 +165,8 @@ ipcMain.handle('aud:set-vis-option', (_event, option: 'separate' | 'onTop', on: 
 });
 
 app.whenReady().then(() => {
+  // Packaged, the dock shows the bundle's icon.icns; unpackaged it would be Electron's.
+  if (!app.isPackaged) app.dock?.setIcon(path.join(__dirname, '../../resources/icon.png'));
   sources.start(); // needs safeStorage, which needs the app ready
   void subsonicPlayback.subsonic.start();
   void daap.start();
