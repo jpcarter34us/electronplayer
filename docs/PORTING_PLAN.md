@@ -115,7 +115,7 @@ Totals: ~65 plugins run unchanged natively, ~25 need a web UI, ~8 map to Electro
 | 0. Scaffold *(done in this repo)* | Electron + TS app, `AudBackend` interface, HTML5 stub backend, upstream vendored as submodules | `npm start` plays local files |
 | 1. Native core *(done on macOS)* | `scripts/build-audacious.sh` builds libaudcore + headless plugins into `vendor/prefix`; the addon links it and plays a file | `NativeBackend` passes the same smoke test as `Html5Backend` |
 | 2. Modern UI | Playlists, multiple tabs, queue, search, equalizer, menus; prefs dialogs generated from JSON | Feature parity with gtkui main window |
-| 3. Platform integration | Tray, global hotkeys, notifications, MediaSession/MPRIS, file associations, drag and drop | |
+| 3. Platform integration | Tray, global hotkeys, notifications, MediaSession/MPRIS, file associations, drag and drop. Touch Bar controls done (`src/main/touchbar.ts`). | |
 | 4. Vis + General UIs | Spectrum, scope, VU, album art, lyrics, song info, history, playlist manager, file browser | |
 | 5. Classic skins | `.wsz` loader, main/EQ/playlist windows, shade mode, docking | Default skins from `skins-data` render pixel-correct |
 | 6. Packaging | electron-builder for macOS (universal), Windows, Linux; bundle plugins and dylibs; codesign | Installable artifacts from CI |

@@ -2,12 +2,33 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadNativeCore, type NativeMethod } from './native';
+import { createPlaybackTouchBar } from './touchbar';
+import type { PlaybackState, Track } from '../shared/backend';
+
+let playbackTouchBar: ReturnType<typeof createPlaybackTouchBar> | undefined;
 
 // libaudcore keeps its config and playlists under $XDG_CONFIG_HOME/audacious;
 // point it at our own userData so a regular Audacious install is untouched.
 const native = loadNativeCore(app.getPath('userData'), (event) => {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('aud:event', event);
+  playbackTouchBar?.update(event);
 });
+
+// Touch Bar controls talk to libaudcore directly, so they need the native
+// engine; the HTML5 fallback plays inside the renderer.
+function setUpTouchBar(): void {
+  if (process.platform !== 'darwin' || !native.call) return;
+  const call = native.call;
+  const touchBar = (playbackTouchBar = createPlaybackTouchBar(call));
+  // Catch up on events sent before the Touch Bar existed; resolves once the
+  // engine is running, without holding up the window.
+  Promise.all([call('getPlaylist', []), call('getState', [])])
+    .then(([tracks, state]) => {
+      touchBar.update({ type: 'playlist', tracks: tracks as Track[] });
+      touchBar.update({ type: 'state', state: state as PlaybackState });
+    })
+    .catch((err) => console.error('Touch Bar sync failed:', err));
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -23,6 +44,7 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+  if (playbackTouchBar) win.setTouchBar(playbackTouchBar.touchBar);
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
@@ -49,6 +71,7 @@ ipcMain.handle('aud:call', (_event, method: NativeMethod, args: unknown[]) => {
 });
 
 app.whenReady().then(() => {
+  setUpTouchBar();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
