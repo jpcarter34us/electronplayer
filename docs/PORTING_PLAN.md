@@ -114,9 +114,9 @@ Totals: ~65 plugins run unchanged natively, ~25 need a web UI, ~8 map to Electro
 |---|---|---|
 | 0. Scaffold *(done in this repo)* | Electron + TS app, `AudBackend` interface, HTML5 stub backend, upstream vendored as submodules | `npm start` plays local files |
 | 1. Native core *(done on macOS)* | `scripts/build-audacious.sh` builds libaudcore + headless plugins into `vendor/prefix`; the addon links it and plays a file | `NativeBackend` passes the same smoke test as `Html5Backend` |
-| 2. Modern UI | Playlists, multiple tabs, queue, search, equalizer, menus; prefs dialogs generated from JSON | Feature parity with gtkui main window |
+| 2. Modern UI | Playlists, multiple tabs, queue, search, equalizer, menus; prefs dialogs generated from JSON. **Done:** menu bar, Settings window, generated plugin settings, Equalizer (see §7). **Left:** multiple playlists, queue, search, song info, playlist manager. | Feature parity with gtkui main window |
 | 3. Platform integration | Tray, global hotkeys, notifications, MediaSession/MPRIS, file associations, drag and drop. Touch Bar controls done (`src/main/touchbar.ts`). | |
-| 4. Vis + General UIs | Spectrum, scope, VU, album art, lyrics, song info, history, playlist manager, file browser | |
+| 4. Vis + General UIs | Spectrum, scope, VU, album art, lyrics, song info, history, playlist manager, file browser. **Done:** spectrum, blur scope, VU meter. | |
 | 5. Classic skins | `.wsz` loader, main/EQ/playlist windows, shade mode, docking | Default skins from `skins-data` render pixel-correct |
 | 6. Packaging | electron-builder for macOS (universal), Windows, Linux; bundle plugins and dylibs; codesign | Installable artifacts from CI |
 
@@ -132,7 +132,16 @@ Findings:
 - **First load.** The first-ever `init()` (macOS checking 50 newly built dylibs) took longer than 20 s once. Later starts take about 3 s.
 - **Deployment target.** Homebrew dylibs target the host macOS version. Shipping to older macOS needs dependencies built with `MACOSX_DEPLOYMENT_TARGET`.
 
-## 7. Risks and open questions
+## 7. Menus, settings and plugin access
+
+- **Menu bar** (`src/main/menu.ts`) follows qtui's `menus.cc`: File (open/add files and folders), Playback (transport, the five playback toggles, A-B repeat), Playlist (sort, remove duplicates or unavailable files, refresh), Output (volume, Equalizer, Effects, Audio Settings), View (visualizers). Shortcuts match upstream, except where macOS reserves the key (Cmd+, is Settings and Cmd+M is Minimize).
+- **Plugin settings are generated, not hand-ported.** The addon serializes each plugin's `PreferencesWidget` tree to JSON (`openPrefs`). It keeps a session that maps widget ids back to the C++ widgets and runs the plugin's `init`, `apply` and `cleanup`. `src/renderer/prefs-form.ts` renders the JSON using libaudqt's rules: child widgets are enabled by their parent check or radio button, and radio buttons group by level. All 25 plugins with settings in this build render, and none needed a hand-written custom widget.
+- **The Settings window** (`settings.html`) reuses the same renderer. The core pages (Audio, Network, Playlist, Song Info, Advanced) are ported from `libaudqt/prefs-window-qt.cc` as widget data bound to config keys. The Plugins page enables and disables plugins per type and opens their settings and about text.
+- **The Equalizer** writes through libaudcore (`equalizer_active`, `equalizer_preamp`, `aud_eq_set_bands`) and saves presets to the same `eq.preset` file upstream uses. Upstream ships no default presets.
+- **Visualizations** come from a `Visualizer` the addon registers only while a visualizer is on. Frames (256 frequency bins, 512 PCM samples and per-channel peaks, about 30 per second) go to the main window, where canvas ports of cairo-spectrum, blur_scope and vumeter draw them. libaudcore's band math (`compute_log_xscale` / `compute_freq_band`) is ported exactly.
+- **Not ported yet:** the Qt-only Appearance page, recording settings and Record Stream, Open URL, the Services menu (`aud_plugin_menu_add` items), the log inspector, and the playlist-management, queue and song-info dialogs (phase 2).
+
+## 8. Risks and open questions
 - **Linux main loop**: the GLib backend uses the *global default* `GMainContext` (`g_timeout_add_full` in `mainloop.cc`). On Linux, Chromium's UI thread also uses that context, so the engine thread would compete with it. Plan: an upstream patch so libaudcore uses its own context (or a libuv `MainloopType`).
 - **Licensing**: shipping GPL plugins (e.g. ffaudio, sid, adplug) makes the distributed app GPL. Decide on the license for this repo early.
 - **Windows build**: upstream's Windows build uses MSYS2/MinGW. The addon must then be built with the same toolchain, or the core must be loaded dynamically through a C shim to avoid C++ ABI mismatches.

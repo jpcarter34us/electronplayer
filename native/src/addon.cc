@@ -5,14 +5,21 @@
 // answered with a Promise; engine hooks are pushed back to JS as
 // BackendEvent-shaped objects (see src/shared/backend.ts). The two threads
 // only exchange plain C++ data; N-API values are built on the JS thread.
+//
+// Plugin preference trees (PreferencesWidget, libaudcore/preferences.h) are
+// serialized to JSON so the renderer can build settings dialogs from the
+// same declarations GTK and Qt use; see src/shared/prefs.ts.
 
 #include <napi.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <deque>
 #include <functional>
 #include <future>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -20,14 +27,18 @@
 
 #include <libaudcore/audstrings.h>
 #include <libaudcore/drct.h>
+#include <libaudcore/equalizer.h>
 #include <libaudcore/hook.h>
 #include <libaudcore/i18n.h>
+#include <libaudcore/interface.h>
 #include <libaudcore/mainloop.h>
 #include <libaudcore/playlist.h>
 #include <libaudcore/plugin.h>
 #include <libaudcore/plugins.h>
+#include <libaudcore/preferences.h>
 #include <libaudcore/runtime.h>
 #include <libaudcore/tuple.h>
+#include <libaudcore/visualizer.h>
 
 namespace {
 
@@ -48,7 +59,7 @@ struct StateData
 struct PluginData
 {
     std::string id, name, type;
-    bool enabled, has_prefs;
+    bool enabled, has_prefs, has_about;
 };
 
 static std::string str (const String & s) { return s ? std::string (s) : std::string (); }
@@ -87,7 +98,8 @@ static std::vector<TrackData> snapshot_playlist ()
 
         if (tuple.state () == Tuple::Valid)
         {
-            t.title = str (tuple.get_str (Tuple::Title));
+            // Honors the "Title format" setting, like the upstream playlist.
+            t.title = str (tuple.get_str (Tuple::FormattedTitle));
             t.artist = str (tuple.get_str (Tuple::Artist));
             t.album = str (tuple.get_str (Tuple::Album));
             t.length = std::max (tuple.get_int (Tuple::Length), -1);
@@ -126,7 +138,7 @@ static std::vector<PluginData> snapshot_plugins ()
         for (PluginHandle * p : aud_plugin_list ((PluginType) t))
             plugins.push_back ({aud_plugin_get_basename (p), aud_plugin_get_name (p),
                                 type_name ((PluginType) t), aud_plugin_get_enabled (p),
-                                aud_plugin_has_configure (p)});
+                                aud_plugin_has_configure (p), aud_plugin_has_about (p)});
     }
     return plugins;
 }
@@ -174,6 +186,7 @@ static Napi::Value to_js (Napi::Env env, const std::vector<PluginData> & plugins
         o.Set ("type", plugins[i].type);
         o.Set ("enabled", plugins[i].enabled);
         o.Set ("hasPrefs", plugins[i].has_prefs);
+        o.Set ("hasAbout", plugins[i].has_about);
         a.Set (i, o);
     }
     return a;
@@ -265,6 +278,12 @@ static void on_error (void * data, void *)
 static const char * const playback_hooks[] = {
     "playback begin", "playback ready", "playback pause", "playback unpause",
     "playback seek", "playback stop", "playback end", "title change", "info change"};
+static void emit_equalizer ();
+static void on_equalizer (void *, void *) { emit_equalizer (); }
+static const char * const equalizer_hooks[] = {
+    "set equalizer_active", "set equalizer_preamp", "set equalizer_bands"};
+static void vis_stop ();
+
 static const char * const playlist_hooks[] = {
     "playlist update", "playlist activate", "playlist position", "playlist set playing"};
 
@@ -282,6 +301,8 @@ static void engine_main (std::string config_home, std::promise<void> * ready)
     for (auto name : playlist_hooks)
         hook_associate (name, on_playlist, nullptr);
     hook_associate ("ui show error", on_error, nullptr);
+    for (auto name : equalizer_hooks)
+        hook_associate (name, on_equalizer, nullptr);
 
     // Position updates while playing; libaudcore has no per-tick hook.
     ticker.start (250, [] () {
@@ -301,6 +322,9 @@ static void engine_main (std::string config_home, std::promise<void> * ready)
     for (auto name : playlist_hooks)
         hook_dissociate (name, on_playlist);
     hook_dissociate ("ui show error", on_error);
+    for (auto name : equalizer_hooks)
+        hook_dissociate (name, on_equalizer);
+    vis_stop ();
 
     aud_cleanup ();
 }
@@ -332,6 +356,380 @@ static Napi::Value call (Napi::Env env, Work work)
 static auto undefined_result ()
 {
     return [] (Napi::Env env) -> Napi::Value { return env.Undefined (); };
+}
+
+
+// ---- JSON (preference trees and values go to JS as JSON text) ----
+
+static void json_str (std::string & out, const char * s)
+{
+    out += '"';
+    for (; s && *s; s++)
+    {
+        unsigned char c = *s;
+        if (c == '"' || c == '\\')
+            (out += '\\') += c;
+        else if (c == '\n')
+            out += "\\n";
+        else if (c < 0x20)
+        {
+            char buf[8];
+            snprintf (buf, sizeof buf, "\\u%04x", c);
+            out += buf;
+        }
+        else
+            out += c;
+    }
+    out += '"';
+}
+
+static std::string json_num (double v)
+{
+    char buf[32];
+    snprintf (buf, sizeof buf, "%.10g", v);
+    return buf;
+}
+
+static Napi::Value parse_json (Napi::Env env, const std::string & json)
+{
+    auto parse = env.Global ().Get ("JSON").As<Napi::Object> ().Get ("parse").As<Napi::Function> ();
+    return parse.Call ({Napi::String::New (env, json)});
+}
+
+static auto json_result (std::string json)
+{
+    return [json] (Napi::Env env) { return parse_json (env, json); };
+}
+
+// ---- plugin preference sessions (engine thread only) ----
+
+struct PrefsSession
+{
+    const PluginPreferences * prefs;
+    std::vector<const PreferencesWidget *> widgets; // index = widget id
+};
+
+static std::map<int, PrefsSession> prefs_sessions;
+static int next_prefs_session = 1;
+
+static const char * cfg_type_name (WidgetConfig::Type type)
+{
+    switch (type)
+    {
+    case WidgetConfig::Bool: return "bool";
+    case WidgetConfig::Int: return "int";
+    case WidgetConfig::Float: return "float";
+    case WidgetConfig::String: return "string";
+    default: return nullptr;
+    }
+}
+
+static void serialize_widgets (std::string & out, ArrayRef<PreferencesWidget> widgets, PrefsSession & session);
+
+static void serialize_widget (std::string & out, const PreferencesWidget & w, PrefsSession & session)
+{
+    static const char * const kinds[] = {
+        "label", "button", "check", "radio", "spin", "entry", "file", "combo",
+        "font", "box", "table", "notebook", "separator", "custom", "custom"};
+
+    int id = session.widgets.size ();
+    session.widgets.push_back (&w);
+
+    out += "{\"id\":" + std::to_string (id) + ",\"type\":\"" + kinds[w.type] + '"';
+    if (w.label)
+    {
+        out += ",\"label\":";
+        json_str (out, w.label);
+    }
+    if (w.child)
+        out += ",\"child\":true";
+    if (auto cfg = cfg_type_name (w.cfg.type))
+        out += std::string (",\"cfg\":\"") + cfg + '"';
+
+    switch (w.type)
+    {
+    case PreferencesWidget::RadioButton:
+        out += ",\"value\":" + std::to_string (w.data.radio_btn.value);
+        break;
+    case PreferencesWidget::SpinButton:
+        out += ",\"min\":" + json_num (w.data.spin_btn.min) + ",\"max\":" + json_num (w.data.spin_btn.max) +
+               ",\"step\":" + json_num (w.data.spin_btn.step);
+        if (w.data.spin_btn.right_label)
+        {
+            out += ",\"unit\":";
+            json_str (out, w.data.spin_btn.right_label);
+        }
+        break;
+    case PreferencesWidget::Entry:
+        if (w.data.entry.password)
+            out += ",\"password\":true";
+        break;
+    case PreferencesWidget::FileEntry:
+        out += std::string (",\"mode\":\"") + (w.data.file_entry.mode == FileSelectMode::Folder ? "folder" : "file") + '"';
+        break;
+    case PreferencesWidget::ComboBox:
+    {
+        auto items = w.data.combo.fill ? w.data.combo.fill () : w.data.combo.elems;
+        out += ",\"items\":[";
+        for (int i = 0; i < items.len; i++)
+        {
+            if (i)
+                out += ',';
+            out += "{\"label\":";
+            json_str (out, items.data[i].label);
+            out += ",\"value\":";
+            if (items.data[i].str)
+                json_str (out, items.data[i].str);
+            else
+                out += std::to_string (items.data[i].num);
+            out += '}';
+        }
+        out += ']';
+        break;
+    }
+    case PreferencesWidget::Box:
+        out += std::string (",\"horizontal\":") + (w.data.box.horizontal ? "true" : "false") +
+               ",\"frame\":" + (w.data.box.frame ? "true" : "false") + ",\"children\":";
+        serialize_widgets (out, w.data.box.widgets, session);
+        break;
+    case PreferencesWidget::Table:
+        out += ",\"children\":";
+        serialize_widgets (out, w.data.table.widgets, session);
+        break;
+    case PreferencesWidget::Notebook:
+        out += ",\"tabs\":[";
+        for (int i = 0; i < w.data.notebook.tabs.len; i++)
+        {
+            if (i)
+                out += ',';
+            out += "{\"name\":";
+            json_str (out, w.data.notebook.tabs.data[i].name);
+            out += ",\"children\":";
+            serialize_widgets (out, w.data.notebook.tabs.data[i].widgets, session);
+            out += '}';
+        }
+        out += ']';
+        break;
+    case PreferencesWidget::Separator:
+        out += std::string (",\"horizontal\":") + (w.data.separator.horizontal ? "true" : "false");
+        break;
+    default:
+        break;
+    }
+
+    out += '}';
+}
+
+static void serialize_widgets (std::string & out, ArrayRef<PreferencesWidget> widgets, PrefsSession & session)
+{
+    out += '[';
+    for (int i = 0; i < widgets.len; i++)
+    {
+        if (i)
+            out += ',';
+        serialize_widget (out, widgets.data[i], session);
+    }
+    out += ']';
+}
+
+// {"<id>": value, ...} for every widget bound to a setting.
+static std::string serialize_values (const PrefsSession & session)
+{
+    std::string out = "{";
+    bool first = true;
+    for (size_t id = 0; id < session.widgets.size (); id++)
+    {
+        const WidgetConfig & cfg = session.widgets[id]->cfg;
+        if (cfg.type == WidgetConfig::None)
+            continue;
+        if (!first)
+            out += ',';
+        first = false;
+        out += '"' + std::to_string (id) + "\":";
+        switch (cfg.type)
+        {
+        case WidgetConfig::Bool: out += cfg.get_bool () ? "true" : "false"; break;
+        case WidgetConfig::Int: out += std::to_string (cfg.get_int ()); break;
+        case WidgetConfig::Float: out += json_num (cfg.get_float ()); break;
+        case WidgetConfig::String: json_str (out, cfg.get_string ()); break;
+        default: break;
+        }
+    }
+    return out + '}';
+}
+
+// A value from JS, converted on the JS thread.
+struct PrefValue
+{
+    bool b = false;
+    double num = 0;
+    std::string str;
+};
+
+static PrefValue pref_value (const Napi::Value & v)
+{
+    PrefValue out;
+    if (v.IsBoolean ())
+        out.b = v.As<Napi::Boolean> ().Value (), out.num = out.b;
+    else if (v.IsNumber ())
+        out.num = v.As<Napi::Number> ().DoubleValue (), out.b = out.num != 0;
+    else if (!v.IsUndefined () && !v.IsNull ())
+        out.str = v.ToString ().Utf8Value ();
+    return out;
+}
+
+static void apply_cfg (const WidgetConfig & cfg, const PrefValue & v)
+{
+    switch (cfg.type)
+    {
+    case WidgetConfig::Bool: cfg.set_bool (v.b); break;
+    case WidgetConfig::Int: cfg.set_int ((int) v.num); break;
+    case WidgetConfig::Float: cfg.set_float (v.num); break;
+    case WidgetConfig::String: cfg.set_string (v.str.c_str ()); break;
+    default: break;
+    }
+}
+
+// ---- equalizer ----
+
+static std::string serialize_eq ()
+{
+    double bands[AUD_EQ_NBANDS];
+    aud_eq_get_bands (bands);
+    std::string out = std::string ("{\"active\":") + (aud_get_bool ("equalizer_active") ? "true" : "false") +
+                      ",\"preamp\":" + json_num (aud_get_double ("equalizer_preamp")) + ",\"bands\":[";
+    for (int i = 0; i < AUD_EQ_NBANDS; i++)
+        out += (i ? "," : "") + json_num (bands[i]);
+    return out + "]}";
+}
+
+static void emit_equalizer ()
+{
+    std::string json = serialize_eq ();
+    to_js_async ([json] (Napi::Env env, Napi::Function cb) {
+        auto ev = Napi::Object::New (env);
+        ev.Set ("type", "equalizer");
+        ev.Set ("equalizer", parse_json (env, json));
+        cb.Call ({ev});
+    });
+}
+
+// ---- visualization ----
+
+// Streams libaudcore's vis frames (~30/s while playing) to JS: 512 mono PCM
+// samples, 256 frequency intensities and per-channel peak levels.
+class VisBridge final : public Visualizer
+{
+public:
+    VisBridge () : Visualizer (MonoPCM | MultiPCM | Freq) {}
+
+    void clear () override
+    {
+        to_js_async ([] (Napi::Env env, Napi::Function cb) {
+            auto ev = Napi::Object::New (env);
+            ev.Set ("type", "vis-clear");
+            cb.Call ({ev});
+        });
+    }
+
+    void render_mono_pcm (const float * pcm) override { mono.assign (pcm, pcm + 512); }
+
+    void render_multi_pcm (const float * pcm, int channels) override
+    {
+        levels.assign (channels, 0);
+        for (int i = 0; i < 512 * channels; i++)
+            levels[i % channels] = std::max (levels[i % channels], std::abs (pcm[i]));
+    }
+
+    // Called last for each frame (visualization.cc), so it sends the frame.
+    void render_freq (const float * freq) override
+    {
+        std::vector<float> f (freq, freq + 256);
+        auto m = mono;
+        auto l = levels;
+        to_js_async ([f, m, l] (Napi::Env env, Napi::Function cb) {
+            auto copy = [&] (const std::vector<float> & v) {
+                auto a = Napi::Float32Array::New (env, v.size ());
+                std::copy (v.begin (), v.end (), a.Data ());
+                return a;
+            };
+            auto ev = Napi::Object::New (env);
+            ev.Set ("type", "vis");
+            ev.Set ("freq", copy (f));
+            ev.Set ("pcm", copy (m));
+            ev.Set ("levels", copy (l));
+            cb.Call ({ev});
+        });
+    }
+
+private:
+    std::vector<float> mono = std::vector<float> (512, 0), levels;
+};
+
+static VisBridge * vis_bridge = nullptr;
+
+static void vis_start ()
+{
+    if (!vis_bridge)
+        aud_visualizer_add (vis_bridge = new VisBridge);
+}
+
+static void vis_stop ()
+{
+    if (vis_bridge)
+    {
+        aud_visualizer_remove (vis_bridge);
+        delete vis_bridge;
+        vis_bridge = nullptr;
+    }
+}
+
+// ---- playlist and playback commands (menu items without a dedicated API) ----
+
+static bool run_command (const std::string & name, const std::string & arg)
+{
+    static const std::map<std::string, Playlist::SortType> sort_types = {
+        {"path", Playlist::Path}, {"filename", Playlist::Filename}, {"title", Playlist::Title},
+        {"album", Playlist::Album}, {"artist", Playlist::Artist}, {"album-artist", Playlist::AlbumArtist},
+        {"date", Playlist::Date}, {"genre", Playlist::Genre}, {"track", Playlist::Track},
+        {"custom-title", Playlist::FormattedTitle}, {"length", Playlist::Length},
+        {"comment", Playlist::Comment}, {"disc", Playlist::Disc}, {"bitrate", Playlist::Bitrate},
+        {"file-created", Playlist::FileCreated}, {"file-modified", Playlist::FileModified}};
+
+    auto pl = Playlist::active_playlist ();
+
+    if (name == "prev-album") aud_drct_pl_prev_album ();
+    else if (name == "next-album") aud_drct_pl_next_album ();
+    else if (name == "play-resume") pl.start_playback ();
+    else if (name == "refresh") pl.rescan_all ();
+    else if (name == "reverse") pl.reverse_order ();
+    else if (name == "randomize") pl.randomize_order ();
+    else if (name == "remove-unavailable") pl.remove_unavailable ();
+    else if ((name == "sort" || name == "remove-duplicates") && sort_types.count (arg))
+    {
+        if (name == "sort")
+            pl.sort_entries (sort_types.at (arg));
+        else
+            pl.remove_duplicates (sort_types.at (arg));
+    }
+    else if (name == "ab-a" || name == "ab-b" || name == "ab-clear")
+    {
+        int a, b;
+        aud_drct_get_ab_repeat (a, b);
+        if (name == "ab-clear")
+            a = b = -1;
+        else if (!aud_drct_get_playing ())
+            return false;
+        else if (name == "ab-a")
+            a = aud_drct_get_time ();
+        else
+            b = aud_drct_get_time ();
+        aud_drct_set_ab_repeat (a, b);
+    }
+    else
+        return false;
+
+    return true;
 }
 
 // ---- exported functions ----
@@ -478,6 +876,20 @@ Napi::Value Add (const Napi::CallbackInfo & info)
     });
 }
 
+// open(uris: string[]): like File > Open; honors "Clear the playlist when
+// opening files" and "Open files in a temporary playlist", then plays.
+Napi::Value Open (const Napi::CallbackInfo & info)
+{
+    auto uris = string_array (info.Length () > 0 ? info[0] : info.Env ().Undefined ());
+    return call (info.Env (), [uris] () {
+        Index<PlaylistAddItem> items;
+        for (auto & uri : uris)
+            items.append (String (uri.c_str ()));
+        aud_drct_pl_open_list (std::move (items));
+        return undefined_result ();
+    });
+}
+
 Napi::Value Remove (const Napi::CallbackInfo & info)
 {
     auto positions = int_array (info.Length () > 0 ? info[0] : info.Env ().Undefined ());
@@ -516,8 +928,303 @@ Napi::Value ListPlugins (const Napi::CallbackInfo & info)
     });
 }
 
+
+static PluginHandle * plugin_arg (const Napi::CallbackInfo & info)
+{
+    return (info.Length () > 0 && info[0].IsString ())
+               ? aud_plugin_lookup_basename (info[0].As<Napi::String> ().Utf8Value ().c_str ())
+               : nullptr;
+}
+
+static Napi::Value reject (Napi::Env env, const char * message)
+{
+    auto deferred = Napi::Promise::Deferred::New (env);
+    deferred.Reject (Napi::Error::New (env, message).Value ());
+    return deferred.Promise ();
+}
+
+// getConfig(section: string | null, name: string, type: 'bool'|'int'|'float'|'string')
+Napi::Value GetConfig (const Napi::CallbackInfo & info)
+{
+    if (info.Length () < 3)
+        return reject (info.Env (), "getConfig(section, name, type)");
+    std::string section = info[0].IsString () ? info[0].As<Napi::String> ().Utf8Value () : "";
+    std::string name = info[1].ToString ().Utf8Value ();
+    std::string type = info[2].ToString ().Utf8Value ();
+    return call (info.Env (), [section, name, type] () {
+        const char * sec = section.empty () ? nullptr : section.c_str ();
+        std::string json;
+        if (type == "bool") json = aud_get_bool (sec, name.c_str ()) ? "true" : "false";
+        else if (type == "int") json = std::to_string (aud_get_int (sec, name.c_str ()));
+        else if (type == "float") json = json_num (aud_get_double (sec, name.c_str ()));
+        else json_str (json, aud_get_str (sec, name.c_str ()));
+        return json_result (json);
+    });
+}
+
+// setConfig(section: string | null, name: string, type, value)
+Napi::Value SetConfig (const Napi::CallbackInfo & info)
+{
+    if (info.Length () < 4)
+        return reject (info.Env (), "setConfig(section, name, type, value)");
+    std::string section = info[0].IsString () ? info[0].As<Napi::String> ().Utf8Value () : "";
+    std::string name = info[1].ToString ().Utf8Value ();
+    std::string type = info[2].ToString ().Utf8Value ();
+    PrefValue v = pref_value (info[3]);
+    return call (info.Env (), [section, name, type, v] () {
+        const char * sec = section.empty () ? nullptr : section.c_str ();
+        if (type == "bool") aud_set_bool (sec, name.c_str (), v.b);
+        else if (type == "int") aud_set_int (sec, name.c_str (), (int) v.num);
+        else if (type == "float") aud_set_double (sec, name.c_str (), v.num);
+        else aud_set_str (sec, name.c_str (), v.str.c_str ());
+
+        // Side effects the Qt settings window performs for core settings.
+        if (!sec && name == "output_bit_depth")
+            aud_output_reset (OutputReset::ReopenStream);
+        return undefined_result ();
+    });
+}
+
+// enablePlugin(id, enable): Promise<boolean>. Enabling an output plugin
+// switches to it.
+Napi::Value EnablePlugin (const Napi::CallbackInfo & info)
+{
+    PluginHandle * p = plugin_arg (info);
+    bool enable = info.Length () > 1 && info[1].ToBoolean ().Value ();
+    return call (info.Env (), [p, enable] () {
+        bool ok = p && aud_plugin_enable (p, enable);
+        return [ok] (Napi::Env env) -> Napi::Value { return Napi::Boolean::New (env, ok); };
+    });
+}
+
+Napi::Value PluginAbout (const Napi::CallbackInfo & info)
+{
+    PluginHandle * p = plugin_arg (info);
+    return call (info.Env (), [p] () {
+        auto header = p ? (const Plugin *) aud_plugin_get_header (p) : nullptr;
+        std::string about = (header && header->info.about) ? header->info.about : "";
+        return [about] (Napi::Env env) -> Napi::Value { return Napi::String::New (env, about); };
+    });
+}
+
+// openPrefs(id): Promise<{ session, name, hasApply, widgets, values }>.
+// Calls the plugin's init(); pair with closePrefs(session).
+Napi::Value OpenPrefs (const Napi::CallbackInfo & info)
+{
+    PluginHandle * p = plugin_arg (info);
+    if (!p)
+        return reject (info.Env (), "unknown plugin");
+    return call (info.Env (), [p] () {
+        auto header = (const Plugin *) aud_plugin_get_header (p);
+        if (!header || !header->info.prefs)
+            return json_result ("null");
+
+        int id = next_prefs_session++;
+        PrefsSession & session = prefs_sessions[id];
+        session.prefs = header->info.prefs;
+        if (session.prefs->init)
+            session.prefs->init ();
+
+        std::string json = "{\"session\":" + std::to_string (id) + ",\"name\":";
+        json_str (json, aud_plugin_get_name (p));
+        json += std::string (",\"hasApply\":") + (session.prefs->apply ? "true" : "false") + ",\"widgets\":";
+        serialize_widgets (json, session.prefs->widgets, session);
+        json += ",\"values\":" + serialize_values (session) + '}';
+        return json_result (json);
+    });
+}
+
+static int session_arg (const Napi::CallbackInfo & info)
+{
+    return info.Length () > 0 ? info[0].ToNumber ().Int32Value () : 0;
+}
+
+// Runs fn against a live session and resolves with its current values
+// (a change can update other widgets).
+template<class Fn>
+static Napi::Value with_session (const Napi::CallbackInfo & info, Fn fn)
+{
+    int id = session_arg (info);
+    return call (info.Env (), [id, fn] () {
+        auto it = prefs_sessions.find (id);
+        if (it == prefs_sessions.end ())
+            return json_result ("null");
+        fn (it->second);
+        return json_result (serialize_values (it->second));
+    });
+}
+
+Napi::Value PrefsGet (const Napi::CallbackInfo & info)
+{
+    return with_session (info, [] (PrefsSession &) {});
+}
+
+// prefsSet(session, widgetId, value)
+Napi::Value PrefsSet (const Napi::CallbackInfo & info)
+{
+    int widget = info.Length () > 1 ? info[1].ToNumber ().Int32Value () : -1;
+    PrefValue v = pref_value (info.Length () > 2 ? info[2] : info.Env ().Undefined ());
+    return with_session (info, [widget, v] (PrefsSession & s) {
+        if (widget >= 0 && widget < (int) s.widgets.size ())
+            apply_cfg (s.widgets[widget]->cfg, v);
+    });
+}
+
+// prefsButton(session, widgetId)
+Napi::Value PrefsButton (const Napi::CallbackInfo & info)
+{
+    int widget = info.Length () > 1 ? info[1].ToNumber ().Int32Value () : -1;
+    return with_session (info, [widget] (PrefsSession & s) {
+        if (widget >= 0 && widget < (int) s.widgets.size () &&
+            s.widgets[widget]->type == PreferencesWidget::Button && s.widgets[widget]->data.button.callback)
+            s.widgets[widget]->data.button.callback ();
+    });
+}
+
+Napi::Value PrefsApply (const Napi::CallbackInfo & info)
+{
+    return with_session (info, [] (PrefsSession & s) {
+        if (s.prefs->apply)
+            s.prefs->apply ();
+    });
+}
+
+Napi::Value ClosePrefs (const Napi::CallbackInfo & info)
+{
+    int id = session_arg (info);
+    return call (info.Env (), [id] () {
+        auto it = prefs_sessions.find (id);
+        if (it != prefs_sessions.end ())
+        {
+            if (it->second.prefs->cleanup)
+                it->second.prefs->cleanup ();
+            prefs_sessions.erase (it);
+        }
+        return undefined_result ();
+    });
+}
+
+Napi::Value GetEqualizer (const Napi::CallbackInfo & info)
+{
+    return call (info.Env (), [] () { return json_result (serialize_eq ()); });
+}
+
+// setEqualizer({ active?, preamp?, bands? }); any field may be omitted.
+Napi::Value SetEqualizer (const Napi::CallbackInfo & info)
+{
+    if (info.Length () < 1 || !info[0].IsObject ())
+        return reject (info.Env (), "setEqualizer({ active?, preamp?, bands? })");
+    auto o = info[0].As<Napi::Object> ();
+    int active = o.Has ("active") ? o.Get ("active").ToBoolean ().Value () : -1;
+    bool has_preamp = o.Has ("preamp");
+    double preamp = has_preamp ? o.Get ("preamp").ToNumber ().DoubleValue () : 0;
+    std::vector<double> bands;
+    if (o.Get ("bands").IsArray ())
+    {
+        auto a = o.Get ("bands").As<Napi::Array> ();
+        for (uint32_t i = 0; i < a.Length () && i < AUD_EQ_NBANDS; i++)
+            bands.push_back (a.Get (i).ToNumber ().DoubleValue ());
+    }
+    return call (info.Env (), [active, has_preamp, preamp, bands] () {
+        if (active >= 0)
+            aud_set_bool ("equalizer_active", active);
+        if (has_preamp)
+            aud_set_double ("equalizer_preamp", std::clamp (preamp, (double) -AUD_EQ_MAX_GAIN, (double) AUD_EQ_MAX_GAIN));
+        if (bands.size () == AUD_EQ_NBANDS)
+        {
+            double values[AUD_EQ_NBANDS];
+            for (int i = 0; i < AUD_EQ_NBANDS; i++)
+                values[i] = std::clamp (bands[i], (double) -AUD_EQ_MAX_GAIN, (double) AUD_EQ_MAX_GAIN);
+            aud_eq_set_bands (values);
+        }
+        return undefined_result ();
+    });
+}
+
+// getEqPresets(): Promise<{ name, preamp, bands }[]> from eq.preset
+// (user copy, else the shipped defaults).
+Napi::Value GetEqPresets (const Napi::CallbackInfo & info)
+{
+    return call (info.Env (), [] () {
+        std::string json = "[";
+        auto presets = aud_eq_read_presets ("eq.preset");
+        for (int i = 0; i < presets.len (); i++)
+        {
+            json += i ? ",{\"name\":" : "{\"name\":";
+            json_str (json, presets[i].name);
+            json += ",\"preamp\":" + json_num (presets[i].preamp) + ",\"bands\":[";
+            for (int b = 0; b < AUD_EQ_NBANDS; b++)
+                json += (b ? "," : "") + json_num (presets[i].bands[b]);
+            json += "]}";
+        }
+        return json_result (json + ']');
+    });
+}
+
+// saveEqPresets(presets): replaces the user's eq.preset.
+Napi::Value SaveEqPresets (const Napi::CallbackInfo & info)
+{
+    struct Preset { std::string name; double preamp; double bands[AUD_EQ_NBANDS]; };
+    std::vector<Preset> list;
+    if (info.Length () > 0 && info[0].IsArray ())
+    {
+        auto a = info[0].As<Napi::Array> ();
+        for (uint32_t i = 0; i < a.Length (); i++)
+        {
+            auto o = a.Get (i).ToObject ();
+            Preset p {o.Get ("name").ToString ().Utf8Value (), o.Get ("preamp").ToNumber ().DoubleValue (), {}};
+            auto bands = o.Get ("bands");
+            for (int b = 0; b < AUD_EQ_NBANDS; b++)
+                p.bands[b] = bands.IsArray () ? bands.As<Napi::Array> ().Get (b).ToNumber ().DoubleValue () : 0;
+            list.push_back (p);
+        }
+    }
+    return call (info.Env (), [list] () {
+        Index<EqualizerPreset> presets;
+        for (auto & p : list)
+        {
+            EqualizerPreset & e = presets.append ();
+            e.name = String (p.name.c_str ());
+            e.preamp = p.preamp;
+            for (int b = 0; b < AUD_EQ_NBANDS; b++)
+                e.bands[b] = p.bands[b];
+        }
+        bool ok = aud_eq_write_presets (presets, "eq.preset");
+        return [ok] (Napi::Env env) -> Napi::Value { return Napi::Boolean::New (env, ok); };
+    });
+}
+
+// visEnable(on): start/stop streaming "vis" events.
+Napi::Value VisEnable (const Napi::CallbackInfo & info)
+{
+    bool on = info.Length () > 0 && info[0].ToBoolean ().Value ();
+    return call (info.Env (), [on] () {
+        on ? vis_start () : vis_stop ();
+        return undefined_result ();
+    });
+}
+
+// command(name, arg?): Promise<boolean>; see run_command().
+Napi::Value Command (const Napi::CallbackInfo & info)
+{
+    std::string name = info.Length () > 0 ? info[0].ToString ().Utf8Value () : "";
+    std::string arg = (info.Length () > 1 && info[1].IsString ()) ? info[1].As<Napi::String> ().Utf8Value () : "";
+    return call (info.Env (), [name, arg] () {
+        bool ok = run_command (name, arg);
+        return [ok] (Napi::Env env) -> Napi::Value { return Napi::Boolean::New (env, ok); };
+    });
+}
+
 Napi::Object InitModule (Napi::Env env, Napi::Object exports)
 {
+    // If the process exits without shutdown() (e.g. Electron's app.exit()
+    // skips will-quit), let the engine thread die with it instead of
+    // std::terminate() destroying a joinable thread.
+    std::atexit ([] () {
+        if (engine.joinable ())
+            engine.detach ();
+    });
+
     exports.Set ("version", Napi::Function::New (env, Version));
     exports.Set ("init", Napi::Function::New (env, Init));
     exports.Set ("shutdown", Napi::Function::New (env, Shutdown));
@@ -530,10 +1237,27 @@ Napi::Object InitModule (Napi::Env env, Napi::Object exports)
     exports.Set ("setVolume", Napi::Function::New (env, SetVolume));
     exports.Set ("add", Napi::Function::New (env, Add));
     exports.Set ("remove", Napi::Function::New (env, Remove));
+    exports.Set ("open", Napi::Function::New (env, Open));
     exports.Set ("clear", Napi::Function::New (env, Clear));
     exports.Set ("getPlaylist", Napi::Function::New (env, GetPlaylist));
     exports.Set ("getState", Napi::Function::New (env, GetState));
     exports.Set ("listPlugins", Napi::Function::New (env, ListPlugins));
+    exports.Set ("getConfig", Napi::Function::New (env, GetConfig));
+    exports.Set ("setConfig", Napi::Function::New (env, SetConfig));
+    exports.Set ("enablePlugin", Napi::Function::New (env, EnablePlugin));
+    exports.Set ("pluginAbout", Napi::Function::New (env, PluginAbout));
+    exports.Set ("openPrefs", Napi::Function::New (env, OpenPrefs));
+    exports.Set ("prefsGet", Napi::Function::New (env, PrefsGet));
+    exports.Set ("prefsSet", Napi::Function::New (env, PrefsSet));
+    exports.Set ("prefsButton", Napi::Function::New (env, PrefsButton));
+    exports.Set ("prefsApply", Napi::Function::New (env, PrefsApply));
+    exports.Set ("closePrefs", Napi::Function::New (env, ClosePrefs));
+    exports.Set ("getEqualizer", Napi::Function::New (env, GetEqualizer));
+    exports.Set ("setEqualizer", Napi::Function::New (env, SetEqualizer));
+    exports.Set ("getEqPresets", Napi::Function::New (env, GetEqPresets));
+    exports.Set ("saveEqPresets", Napi::Function::New (env, SaveEqPresets));
+    exports.Set ("visEnable", Napi::Function::New (env, VisEnable));
+    exports.Set ("command", Napi::Function::New (env, Command));
     return exports;
 }
 

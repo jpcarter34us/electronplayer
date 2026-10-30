@@ -35,12 +35,40 @@ export interface PluginInfo {
   type: PluginType;
   enabled: boolean;
   hasPrefs: boolean;
+  hasAbout?: boolean;
+}
+
+/** libaudcore's 10-band equalizer; gains in dB, -12 to +12. */
+export interface Equalizer {
+  active: boolean;
+  preamp: number;
+  bands: number[];
+}
+
+export interface EqPreset {
+  name: string;
+  preamp: number;
+  bands: number[];
+}
+
+/** One libaudcore visualization frame (~30 per second while playing). */
+export interface VisFrame {
+  /** Intensities of frequencies 1/512 ... 256/512 of the sample rate. */
+  freq: Float32Array;
+  /** 512 frames of mono PCM, -1 to 1. */
+  pcm: Float32Array;
+  /** Peak level per channel, 0 to 1. */
+  levels: Float32Array;
 }
 
 export type BackendEvent =
   | { type: 'state'; state: PlaybackState }
   | { type: 'playlist'; tracks: Track[] }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  // Native engine only:
+  | { type: 'equalizer'; equalizer: Equalizer }
+  | ({ type: 'vis' } & VisFrame)
+  | { type: 'vis-clear' };
 
 export interface AudBackend {
   readonly name: string;

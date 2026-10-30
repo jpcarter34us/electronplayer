@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'">
+  <title>Equalizer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="window equalizer">
+  <div class="eq-top">
+    <label class="check"><input id="active" type="checkbox"> <span>Enable</span></label>
+    <button id="reset" title="Set all bands and the preamp to 0 dB">Reset to Flat</button>
+  </div>
+  <div id="sliders"></div>
+  <div class="eq-presets">
+    <select id="preset" aria-label="Presets"></select>
+    <input id="preset-name" type="text" placeholder="Preset name" aria-label="Preset name">
+    <button id="save">Save Preset</button>
+    <button id="delete">Delete</button>
+  </div>
+  <script type="module" src="equalizer.js"></script>
+</body>
+</html>

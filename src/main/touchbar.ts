@@ -90,7 +90,8 @@ export function createPlaybackTouchBar(call: Call): { touchBar: TouchBar; update
     set(playPause, 'accessibilityLabel', playing ? 'Pause' : 'Play');
 
     const track = tracks[state.position];
-    set(title, 'label', truncate(track ? (track.artist ? `${track.artist} – ${track.title}` : track.title) : 'Audacious'));
+    // Track titles follow the "Title format" setting, which includes the artist.
+    set(title, 'label', truncate(track?.title ?? 'Audacious'));
 
     if (Date.now() >= scrubUntil) {
       set(seek, 'maxValue', Math.max(1, Math.round(state.length / 1000)));

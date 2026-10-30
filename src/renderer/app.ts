@@ -1,18 +1,9 @@
 import type { AudBackend, PlaybackState, Track } from '../shared/backend.js';
+import type { VisConfig, VisId } from '../shared/prefs.js';
 import { Html5Backend } from './backends/html5.js';
 import { NativeBackend } from './backends/native.js';
-
-declare global {
-  interface Window {
-    audHost: {
-      openFiles(): Promise<string[]>;
-      nativeInfo(): Promise<{ available: boolean; detail: string }>;
-      pathForFile(file: File): string;
-      call(method: string, ...args: unknown[]): Promise<unknown>;
-      onEvent(listener: (event: unknown) => void): () => void;
-    };
-  }
-}
+import './host.js';
+import { createVisualizer, type Visualizer } from './visualizers.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -62,10 +53,31 @@ async function main(): Promise<void> {
     list.querySelectorAll('li').forEach((li, i) => li.classList.toggle('current', i === state.position));
   };
 
+  // Visualizations (native engine only): one canvas per enabled visualizer.
+  const visualizers = new Map<VisId, Visualizer>();
+  const showVis = (config: VisConfig) => {
+    for (const id of Object.keys(config) as VisId[]) {
+      if (config[id] && !visualizers.has(id)) {
+        const vis = createVisualizer(id);
+        vis.canvas.className = `vis vis-${id}`;
+        visualizers.set(id, vis);
+      } else if (!config[id]) visualizers.delete(id);
+    }
+    const order: VisId[] = ['spectrum', 'scope', 'vu'];
+    $('vis').replaceChildren(...order.filter((id) => visualizers.has(id)).map((id) => visualizers.get(id)!.canvas));
+    $('vis').hidden = visualizers.size === 0;
+  };
+  if (native.available) {
+    showVis(await window.audHost.visConfig());
+    window.audHost.onVisConfig(showVis);
+  }
+
   backend.subscribe((e) => {
     if (e.type === 'state') { state = e.state; renderState(); }
     else if (e.type === 'playlist') { tracks = e.tracks; renderPlaylist(); renderState(); }
-    else $('status').textContent = e.message;
+    else if (e.type === 'vis') visualizers.forEach((v) => v.render(e));
+    else if (e.type === 'vis-clear') visualizers.forEach((v) => v.clear());
+    else if (e.type === 'error') $('status').textContent = e.message;
   });
 
   $('open').onclick = async () => backend.add(await window.audHost.openFiles());

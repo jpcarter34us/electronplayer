@@ -1,18 +1,33 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createAppMenu } from './menu';
 import { loadNativeCore, type NativeMethod } from './native';
 import { createPlaybackTouchBar } from './touchbar';
-import type { PlaybackState, Track } from '../shared/backend';
+import { VisState } from './vis';
+import { openEqualizer, openPluginPrefs, openSettings } from './windows';
+import type { PlaybackState, PluginInfo, Track } from '../shared/backend';
+import type { VisId } from '../shared/prefs';
 
 let playbackTouchBar: ReturnType<typeof createPlaybackTouchBar> | undefined;
+let mainWindow: BrowserWindow | undefined;
 
 // libaudcore keeps its config and playlists under $XDG_CONFIG_HOME/audacious;
 // point it at our own userData so a regular Audacious install is untouched.
 const native = loadNativeCore(app.getPath('userData'), (event) => {
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('aud:event', event);
+  // Vis frames arrive ~30 times a second; only the main window draws them.
+  const targets = event.type === 'vis' ? (mainWindow ? [mainWindow] : []) : BrowserWindow.getAllWindows();
+  for (const win of targets) if (!win.isDestroyed()) win.webContents.send('aud:event', event);
   playbackTouchBar?.update(event);
 });
+
+const vis = native.call
+  ? new VisState(native.call, (config) => {
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('aud:vis-config', config);
+      void appMenu?.refresh();
+    })
+  : undefined;
+let appMenu: ReturnType<typeof createAppMenu> | undefined;
 
 // Touch Bar controls talk to libaudcore directly, so they need the native
 // engine; the HTML5 fallback plays inside the renderer.
@@ -46,6 +61,10 @@ function createWindow(): void {
   });
   if (playbackTouchBar) win.setTouchBar(playbackTouchBar.touchBar);
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow = win;
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = undefined;
+  });
 }
 
 ipcMain.handle('aud:open-files', async (event) => {
@@ -70,11 +89,48 @@ ipcMain.handle('aud:call', (_event, method: NativeMethod, args: unknown[]) => {
   return native.call(method, Array.isArray(args) ? args : []);
 });
 
+// Settings, equalizer and plugin-settings windows (native engine only).
+ipcMain.handle('aud:open-window', (event, kind: string, arg?: string) => {
+  if (!native.call) return;
+  const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  if (kind === 'settings') openSettings(arg);
+  else if (kind === 'equalizer') openEqualizer();
+  else if (kind === 'plugin-prefs' && arg) openPluginPrefs(arg, parent);
+});
+
+ipcMain.handle('aud:plugin-about', async (event, id: string) => {
+  if (!native.call) return;
+  const [plugins, about] = (await Promise.all([native.call('listPlugins', []), native.call('pluginAbout', [id])])) as [PluginInfo[], string];
+  const name = plugins.find((p) => p.id === id)?.name ?? id;
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const options = { type: 'info' as const, message: `About ${name}`, detail: about || 'No information available.' };
+  await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+});
+
+// File chooser for plugin settings; libaudcore stores these as URIs.
+ipcMain.handle('aud:choose-path', async (event, mode: 'file' | 'folder', current?: string) => {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const options: Electron.OpenDialogOptions = {
+    properties: [mode === 'folder' ? 'openDirectory' : 'openFile', 'createDirectory'],
+    defaultPath: current?.startsWith('file://') ? decodeURIComponent(new URL(current).pathname) : undefined,
+  };
+  const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+  return result.canceled ? null : pathToFileURL(result.filePaths[0]).href;
+});
+
+ipcMain.handle('aud:vis-config', () => vis?.get() ?? { spectrum: false, scope: false, vu: false });
+ipcMain.handle('aud:set-vis', (_event, id: VisId, on: boolean) => vis?.set(id, !!on));
+
 app.whenReady().then(() => {
   setUpTouchBar();
+  if (native.call) {
+    appMenu = createAppMenu(native.call, vis!);
+    // Both wait for the engine; neither holds up the window.
+    vis!.load().then(() => appMenu!.refresh()).catch((err) => console.error('Menu setup failed:', err));
+  }
   createWindow();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!mainWindow) createWindow();
   });
 });
 

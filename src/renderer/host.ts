@@ -1,0 +1,63 @@
+import type { Equalizer, EqPreset, PluginInfo } from '../shared/backend.js';
+import type { CfgType, PluginPrefsSession, PrefValue, VisConfig, VisId } from '../shared/prefs.js';
+
+/** The preload bridge (src/preload/preload.ts). */
+declare global {
+  interface Window {
+    audHost: {
+      openFiles(): Promise<string[]>;
+      nativeInfo(): Promise<{ available: boolean; detail: string }>;
+      pathForFile(file: File): string;
+      call(method: string, ...args: unknown[]): Promise<unknown>;
+      onEvent(listener: (event: unknown) => void): () => void;
+      openWindow(kind: 'settings' | 'equalizer' | 'plugin-prefs', arg?: string): Promise<void>;
+      pluginAbout(id: string): Promise<void>;
+      choosePath(mode: 'file' | 'folder', current?: string): Promise<string | null>;
+      onNavigate(listener: (hash: string) => void): () => void;
+      visConfig(): Promise<VisConfig>;
+      setVis(id: VisId, on: boolean): Promise<void>;
+      onVisConfig(listener: (config: VisConfig) => void): () => void;
+    };
+  }
+}
+
+const call = <T>(method: string, ...args: unknown[]) => window.audHost.call(method, ...args) as Promise<T>;
+
+/** Native-engine features used by the Settings, plugin and Equalizer windows. */
+export const native = {
+  getConfig: (section: string | null, name: string, type: CfgType) => call<PrefValue>('getConfig', section, name, type),
+  setConfig: (section: string | null, name: string, type: CfgType, value: PrefValue) =>
+    call<void>('setConfig', section, name, type, value),
+
+  listPlugins: () => call<PluginInfo[]>('listPlugins'),
+  enablePlugin: (id: string, enable: boolean) => call<boolean>('enablePlugin', id, enable),
+
+  openPrefs: (id: string) => call<PluginPrefsSession | null>('openPrefs', id),
+  prefsSet: (session: number, widget: number, value: PrefValue) =>
+    call<Record<string, PrefValue> | null>('prefsSet', session, widget, value),
+  prefsButton: (session: number, widget: number) => call<Record<string, PrefValue> | null>('prefsButton', session, widget),
+  prefsApply: (session: number) => call<Record<string, PrefValue> | null>('prefsApply', session),
+  closePrefs: (session: number) => call<void>('closePrefs', session),
+
+  getEqualizer: () => call<Equalizer>('getEqualizer'),
+  setEqualizer: (eq: Partial<Equalizer>) => call<void>('setEqualizer', eq),
+  getEqPresets: () => call<EqPreset[]>('getEqPresets'),
+  saveEqPresets: (presets: EqPreset[]) => call<boolean>('saveEqPresets', presets),
+};
+
+/** Creates an element, assigns `props` (textContent, onclick, ...) and appends children. */
+export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
+  const el = Object.assign(document.createElement(tag), props);
+  el.append(...children);
+  return el;
+}
+
+/** Strips GTK mnemonics: "_Open" -> "Open", "__" -> "_". */
+export const plainLabel = (label: string) => label.replace(/_(_?)/g, (_m, keep) => keep);
+
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** Label markup as safe HTML: everything escaped except <b> and <i>. */
+export const labelHtml = (label: string) =>
+  escapeHtml(plainLabel(label)).replace(/&lt;(\/?)(b|i)&gt;/g, '<$1$2>');

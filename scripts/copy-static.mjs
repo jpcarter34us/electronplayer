@@ -1,5 +1,7 @@
 // Copies non-TS renderer assets (HTML, CSS) into dist/.
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync } from 'node:fs';
 
 mkdirSync('dist/renderer', { recursive: true });
-for (const f of ['index.html', 'styles.css']) cpSync(`src/renderer/${f}`, `dist/renderer/${f}`);
+for (const f of readdirSync('src/renderer')) {
+  if (/\.(html|css)$/.test(f)) cpSync(`src/renderer/${f}`, `dist/renderer/${f}`);
+}

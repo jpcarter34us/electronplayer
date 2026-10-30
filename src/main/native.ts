@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { AudBackend, BackendEvent } from '../shared/backend';
+import type { BackendEvent } from '../shared/backend';
 
 export interface NativeInfo {
   available: boolean;
@@ -10,12 +10,15 @@ export interface NativeInfo {
 /** Backend methods the renderer may invoke over IPC. */
 export const NATIVE_METHODS = [
   'play', 'pause', 'stop', 'next', 'prev', 'seek', 'setVolume',
-  'add', 'remove', 'clear', 'getPlaylist', 'getState', 'listPlugins',
+  'add', 'open', 'remove', 'clear', 'getPlaylist', 'getState', 'listPlugins',
+  'getConfig', 'setConfig', 'enablePlugin', 'pluginAbout', 'command',
+  'openPrefs', 'prefsGet', 'prefsSet', 'prefsButton', 'prefsApply', 'closePrefs',
+  'getEqualizer', 'setEqualizer', 'getEqPresets', 'saveEqPresets', 'visEnable',
 ] as const;
 
 export type NativeMethod = (typeof NATIVE_METHODS)[number];
 
-type Addon = Pick<AudBackend, NativeMethod> & {
+type Addon = Record<NativeMethod, (...args: unknown[]) => Promise<unknown>> & {
   version(): string;
   init(configHome: string, onEvent: (event: BackendEvent) => void): Promise<void>;
   shutdown(): void;
@@ -50,7 +53,7 @@ export function loadNativeCore(configHome: string, onEvent: (event: BackendEvent
     async call(method, args) {
       if (!NATIVE_METHODS.includes(method)) throw new Error(`Unknown method ${method}`);
       await ready;
-      return (addon[method] as (...a: unknown[]) => Promise<unknown>)(...args);
+      return addon[method](...args);
     },
     shutdown: () => addon.shutdown(),
   };

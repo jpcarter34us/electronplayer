@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 
+function on<T>(channel: string, listener: (value: T) => void): () => void {
+  const handler = (_e: IpcRendererEvent, value: T) => listener(value);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 const api = {
   openFiles: (): Promise<string[]> => ipcRenderer.invoke('aud:open-files'),
   nativeInfo: (): Promise<{ available: boolean; detail: string }> => ipcRenderer.invoke('aud:native-info'),
@@ -9,11 +15,21 @@ const api = {
   /** Invokes a libaudcore backend method in the main process. */
   call: (method: string, ...args: unknown[]): Promise<unknown> => ipcRenderer.invoke('aud:call', method, args),
   /** Subscribes to libaudcore events; returns an unsubscribe function. */
-  onEvent: (listener: (event: unknown) => void): (() => void) => {
-    const handler = (_e: IpcRendererEvent, event: unknown) => listener(event);
-    ipcRenderer.on('aud:event', handler);
-    return () => ipcRenderer.removeListener('aud:event', handler);
-  },
+  onEvent: (listener: (event: unknown) => void): (() => void) => on('aud:event', listener),
+
+  /** Opens the Settings ("settings", page), Equalizer or a plugin's settings window. */
+  openWindow: (kind: 'settings' | 'equalizer' | 'plugin-prefs', arg?: string): Promise<void> =>
+    ipcRenderer.invoke('aud:open-window', kind, arg),
+  pluginAbout: (id: string): Promise<void> => ipcRenderer.invoke('aud:plugin-about', id),
+  /** Returns a file:// URI, or null if cancelled. */
+  choosePath: (mode: 'file' | 'folder', current?: string): Promise<string | null> =>
+    ipcRenderer.invoke('aud:choose-path', mode, current),
+  /** Settings window: the main process asks to show another page. */
+  onNavigate: (listener: (hash: string) => void): (() => void) => on('aud:navigate', listener),
+
+  visConfig: (): Promise<Record<string, boolean>> => ipcRenderer.invoke('aud:vis-config'),
+  setVis: (id: string, on: boolean): Promise<void> => ipcRenderer.invoke('aud:set-vis', id, on),
+  onVisConfig: (listener: (config: Record<string, boolean>) => void): (() => void) => on('aud:vis-config', listener),
 };
 
 export type AudHostApi = typeof api;
