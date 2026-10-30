@@ -130,7 +130,11 @@ async function musicAssistantPage(): Promise<HTMLElement> {
       connect.disabled = false;
     }
   };
-  server.onkeydown = token.onkeydown = (e: KeyboardEvent) => e.key === 'Enter' && connect.click();
+  // Block body: an on* handler that returns false cancels the key, which
+  // would stop Cmd+V (and every other shortcut) reaching the Edit menu.
+  server.onkeydown = token.onkeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') connect.click();
+  };
   forget.onclick = () => window.audHost.maForgetToken();
   enabled.onchange = () => {
     speakerBox.disabled = !enabled.checked;

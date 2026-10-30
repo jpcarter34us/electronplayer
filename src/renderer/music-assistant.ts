@@ -146,6 +146,12 @@ function actions(item: MaItem): HTMLElement {
   return h('span', { className: 'ma-actions' }, b('▶', 'Play now', 'play'), b('⤵', 'Play next', 'next'), b('+', 'Add to queue', 'add'));
 }
 
+// Enter opens an item. (Not `e.key === 'Enter' && open(item)`: an on*
+// handler returning false cancels the key, blocking Tab, Space, Cmd+C...)
+const onEnter = (item: MaItem) => (e: KeyboardEvent) => {
+  if (e.key === 'Enter') open(item);
+};
+
 function open(item: MaItem) {
   const view = viewFor(item);
   if (view) push(view);
@@ -155,7 +161,7 @@ function open(item: MaItem) {
 function renderItems(items: MaItem[], layout: 'grid' | 'list'): HTMLElement {
   if (layout === 'grid') {
     return h('div', { className: 'ma-grid' }, ...items.map((item) => {
-      const card = h('div', { className: 'ma-card', tabIndex: 0, title: item.name, onclick: () => open(item), onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && open(item) },
+      const card = h('div', { className: 'ma-card', tabIndex: 0, title: item.name, onclick: () => open(item), onkeydown: onEnter(item) },
         art(item, 'ma-art'), h('div', { className: 'ma-name', textContent: item.name }), h('div', { className: 'ma-sub', textContent: subtitle(item) }));
       if (item.is_playable !== false && item.media_type !== 'folder') card.append(actions(item));
       return card;
@@ -163,7 +169,7 @@ function renderItems(items: MaItem[], layout: 'grid' | 'list'): HTMLElement {
   }
   return h('div', { className: 'ma-list' }, ...items.map((item, i) => {
     const playable = item.is_playable !== false && item.media_type !== 'folder';
-    return h('div', { className: 'ma-row', tabIndex: 0, ondblclick: () => open(item), onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && open(item), onclick: () => CONTAINERS.has(item.media_type) && open(item) },
+    return h('div', { className: 'ma-row', tabIndex: 0, ondblclick: () => open(item), onkeydown: onEnter(item), onclick: () => CONTAINERS.has(item.media_type) && open(item) },
       h('span', { className: 'ma-index', textContent: String(i + 1) }),
       art(item, 'ma-thumb'),
       h('span', { className: 'ma-text' }, h('span', { className: 'ma-name', textContent: item.name + (item.version ? ` (${item.version})` : '') }), h('span', { className: 'ma-sub', textContent: subtitle(item) })),

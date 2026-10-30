@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { installContextMenu } from './context-menu';
 import { createAppMenu } from './menu';
 import { loadNativeCore, type NativeMethod } from './native';
 import { PlaybackSources, sendspinAsLocal } from './playback-source';
@@ -12,6 +13,8 @@ import type { VisId, VisSettings } from '../shared/prefs';
 
 let playbackTouchBar: ReturnType<typeof createPlaybackTouchBar> | undefined;
 let mainWindow: BrowserWindow | undefined;
+
+installContextMenu();
 
 // libaudcore keeps its config and playlists under $XDG_CONFIG_HOME/audacious;
 // point it at our own userData so a regular Audacious install is untouched.
