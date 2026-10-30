@@ -43,16 +43,32 @@ The status bar shows `libaudcore (plugin API …)` when the native engine is act
 npm run dist:mac
 ```
 
-This produces `release/mac/ElectronPlayer.app`, `release/ElectronPlayer-<version>.dmg` and a `.zip`. Prerequisites are the same as for building the engine from source (Xcode command line tools, Homebrew, and the packages listed in `scripts/build-audacious.sh`). `scripts/package-mac.sh` runs these steps:
+This builds both architectures into `release/`:
 
-1. Builds the TypeScript, the renderer bundles and (if needed) the native addon.
-2. `scripts/build-engine-bundle.sh` builds libaudcore and the plugins again, laid out as they sit inside the app (`Contents/Frameworks/engine`). libaudcore's own install-path relocation then finds its plugins in whichever `.app` it runs from, with no patch to Audacious.
-3. `scripts/bundle-dylibs.py` copies the Homebrew libraries the plugins use (44 of them, about 68 MB) into `Frameworks/engine/deps`, repoints every reference to `@executable_path/…`, and fails the build if anything still points outside the app.
-4. electron-builder assembles the app, and `scripts/adhoc-sign.cjs` signs it ad hoc.
+| | Apple Silicon | Intel |
+|---|---|---|
+| App | `release/mac-arm64/ElectronPlayer.app` | `release/mac/ElectronPlayer.app` |
+| Installer | `ElectronPlayer-<version>-arm64.dmg` / `.zip` | `ElectronPlayer-<version>-x64.dmg` / `.zip` |
+| Needs | macOS 15 or later | macOS 26 or later (see below) |
+
+For one architecture only, run `npm run dist:mac:arm64` or `npm run dist:mac:x64`. Prerequisites are the same as for building the engine from source: Xcode command line tools, Homebrew, and the packages listed in `scripts/build-audacious.sh`. `scripts/package-mac.sh` runs these steps for each architecture:
+
+1. Builds the TypeScript and the renderer bundles.
+2. `scripts/build-engine-bundle.sh <arch>` builds libaudcore, the plugins and the native addon again, laid out as they sit inside the app (`Contents/Frameworks/engine`). libaudcore's own install-path relocation then finds its plugins in whichever `.app` it runs from, with no patch to Audacious.
+3. `scripts/bundle-dylibs.py` copies the Homebrew libraries the plugins use (about 40 of them, 50–70 MB) into `Frameworks/engine/deps` and repoints every reference to `@executable_path/…`. The build fails if anything still points outside the app, or if any file is not built for the target architecture.
+4. electron-builder assembles the app, with its minimum macOS set to the newest that any bundled library needs. `scripts/adhoc-sign.cjs` signs it ad hoc.
+
+**Cross-building.** Homebrew installs only your Mac's own architecture. For the other architecture, `scripts/fetch-arm64-deps.py` downloads Homebrew's published arm64 builds ("bottles") of the same packages into `build/deps-arm64`, verifies their checksums and relocates them there; your Homebrew is not touched. Meson then cross-compiles against them. This works from an Intel Mac to Apple Silicon. The reverse is not set up, because Homebrew no longer publishes Intel bottles; on an Apple Silicon Mac, `npm run dist:mac:arm64` builds natively.
 
 What the build is:
-- **For this Mac.** It is ad-hoc signed, so it runs here, but other Macs block it. To share it you need an Apple Developer ID to sign it and Apple notarization, plus a license decision: several plugins and Homebrew's FFmpeg are GPL, so a distributed build must be GPL-compatible.
-- **Intel only, macOS 26 or later.** It uses this Mac's architecture and the Homebrew libraries, which target the macOS version they were built on. An Apple Silicon build needs an Apple Silicon Mac; supporting older macOS needs the libraries built for an older deployment target.
+- **For your own Macs.** It is ad-hoc signed. On the Mac that built it, it just runs. Copied to another Mac (AirDrop, a download, a shared drive), macOS quarantines it and says it "can't be opened" or "is damaged". Clear that once on the other Mac, then open it normally:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/ElectronPlayer.app
+  ```
+  Sharing it with other people needs an Apple Developer ID signature and notarization, plus a license decision: several plugins and Homebrew's FFmpeg are GPL, so a distributed build must be GPL-compatible.
+- **Minimum macOS.** Homebrew builds its libraries for the macOS it runs on. The Intel app therefore needs the same macOS as the Mac that built it (26 here). The Apple Silicon app uses Homebrew's oldest available bottles and runs on macOS 15 or later.
+- **The Apple Silicon build was checked, not run.** It was built on an Intel Mac, which cannot run arm64 code, so nothing played audio in it here. Every binary was checked to be arm64, to point only inside the app, and to be signed. The Intel build was launched and played WAV, MP3, FLAC and Ogg.
+- **No SID plugin on Apple Silicon (C64 music).** Homebrew's current libsidplayfp (3.x) is built without the ReSIDfp engine the plugin needs. The Intel build has SID only because this Mac still has libsidplayfp 2.x. Updating Homebrew would drop it there too.
 - **Keychain prompt.** The first time the app saves a sign-in (Music Assistant or Subsonic), macOS asks to let ElectronPlayer use its "ElectronPlayer Safe Storage" key. Choose **Always Allow**. Because each ad-hoc build has a new signature, a rebuilt app may ask again.
 - **No app icon yet** (Electron's default is used).
 - The SID plugin looks for optional C64 ROM files and a song-length database at a fixed build-time path, so it can't find them in the app (as before, without them SID files still play).

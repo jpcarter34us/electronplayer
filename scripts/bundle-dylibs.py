@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Makes the staged engine self-contained (macOS).
 
-Usage: bundle-dylibs.py <ElectronPlayer.app/Contents>
+Usage: bundle-dylibs.py <ElectronPlayer.app/Contents> [x64|arm64]
 
 Every Mach-O file under Contents/Frameworks/engine (libaudcore, plugins,
 the native addon) is scanned for the libraries it links. Non-system
@@ -10,6 +10,9 @@ into Frameworks/engine/deps, recursively. Every reference is then rewritten
 to @executable_path/../<path inside Contents>, absolute LC_RPATHs are
 removed, and each modified file is re-signed ad hoc (editing a Mach-O
 invalidates its signature).
+
+With an architecture given, every file must contain it (a cross build that
+picked up an Intel Homebrew library would otherwise only fail at launch).
 
 @executable_path is Contents/MacOS for the Electron main process, which is
 the only process that loads the engine.
@@ -155,6 +158,12 @@ def main() -> None:
                 leaks.append(f'{os.path.relpath(path, contents)} rpath {rp}')
     if leaks:
         raise SystemExit('references outside the bundle:\n  ' + '\n  '.join(leaks))
+
+    if len(sys.argv) > 2:
+        want = {'x64': 'x86_64', 'arm64': 'arm64'}[sys.argv[2]]
+        wrong = [os.path.relpath(p, contents) for p in changes if want not in run('lipo', '-archs', p).split()]
+        if wrong:
+            raise SystemExit(f'not built for {want}:\n  ' + '\n  '.join(wrong))
 
     copied = [p for p in changes if p.startswith(deps_dir)]
     size = sum(os.path.getsize(p) for p in copied)

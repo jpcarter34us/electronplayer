@@ -12,7 +12,9 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "build:audacious": "bash scripts/build-audacious.sh",
     "build:native": "cd native && node-gyp rebuild --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers",
-    "dist:mac": "bash scripts/package-mac.sh"
+    "dist:mac": "bash scripts/package-mac.sh",
+    "dist:mac:x64": "bash scripts/package-mac.sh x64",
+    "dist:mac:arm64": "bash scripts/package-mac.sh arm64"
   },
   "devDependencies": {
     "@sendspin/sendspin-js": "5.0.0",
@@ -36,7 +38,7 @@
     ],
     "extraFiles": [
       {
-        "from": "build/stage/ElectronPlayer.app/Contents/Frameworks/engine",
+        "from": "build/stage/${arch}/ElectronPlayer.app/Contents/Frameworks/engine",
         "to": "Frameworks/engine",
         "filter": [
           "**/*",
@@ -44,7 +46,7 @@
         ]
       },
       {
-        "from": "build/stage/ElectronPlayer.app/Contents/Resources/engine",
+        "from": "build/stage/${arch}/ElectronPlayer.app/Contents/Resources/engine",
         "to": "Resources/engine",
         "filter": [
           "locale/**",
@@ -65,7 +67,8 @@
       ],
       "category": "public.app-category.music",
       "identity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "afterPack": "scripts/adhoc-sign.cjs",
     "dmg": {

@@ -1,18 +1,24 @@
 {
+  "variables": {
+    # Development: the engine in vendor/prefix. Packaging passes the staged
+    # engine instead (scripts/build-engine-bundle.sh).
+    "audcore_include%": "<(module_root_dir)/../vendor/prefix/include",
+    "audcore_lib%": "<(module_root_dir)/../vendor/prefix/lib"
+  },
   "targets": [{
     "target_name": "audcore",
     "sources": ["src/addon.cc"],
     "include_dirs": [
       "<!(node -p \"require('node-addon-api').include_dir\")",
-      "../vendor/prefix/include"
+      "<(audcore_include)"
     ],
-    "libraries": ["-L<(module_root_dir)/../vendor/prefix/lib", "-laudcore"],
+    "libraries": ["-L<(audcore_lib)", "-laudcore"],
     "cflags_cc": ["-std=c++17"],
     "defines": ["NAPI_VERSION=9", "NAPI_DISABLE_CPP_EXCEPTIONS"],
     "xcode_settings": {
       "CLANG_CXX_LANGUAGE_STANDARD": "c++17",
       "MACOSX_DEPLOYMENT_TARGET": "12.0",
-      "OTHER_LDFLAGS": ["-Wl,-rpath,@loader_path/../../../vendor/prefix/lib"]
+      "OTHER_LDFLAGS": ["-Wl,-rpath,<(audcore_lib)", "-Wl,-headerpad_max_install_names"]
     }
   }]
 }

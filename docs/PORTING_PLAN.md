@@ -120,7 +120,7 @@ Totals: ~65 plugins run unchanged natively, ~25 need a web UI, ~8 map to Electro
 | 3. Platform integration | Tray, global hotkeys, notifications, MediaSession/MPRIS, file associations, drag and drop. Touch Bar controls done (`src/main/touchbar.ts`). | |
 | 4. Vis + General UIs | Spectrum, scope, VU, album art, lyrics, song info, history, playlist manager, file browser. **Done:** spectrum, blur scope, VU meter. | |
 | 5. Classic skins | `.wsz` loader, main/EQ/playlist windows, shade mode, docking | Default skins from `skins-data` render pixel-correct |
-| 6. Packaging | electron-builder for macOS (universal), Windows, Linux; bundle plugins and dylibs; codesign. **Done for macOS (this Mac's architecture, ad-hoc signed):** `npm run dist:mac`; engine relocated into the bundle by build layout, Homebrew dylibs bundled and repointed, verified from outside the project. **Left:** Developer ID signing and notarization, Apple Silicon / universal, older macOS targets, Windows, Linux, CI. | Installable artifacts from CI |
+| 6. Packaging | electron-builder for macOS (universal), Windows, Linux; bundle plugins and dylibs; codesign. **Done for macOS, Intel and Apple Silicon (ad-hoc signed):** `npm run dist:mac` builds one app per architecture. The engine is relocated into the bundle by its build layout, Homebrew dylibs are bundled and repointed, and arm64 is cross-built on Intel against Homebrew's arm64 bottles. The Intel build was verified from outside the project; the arm64 build was checked statically only. **Left:** Developer ID signing and notarization, a universal app, older macOS targets for Intel, SID on arm64 (needs libresidfp), Windows, Linux, CI. | Installable artifacts from CI |
 
 ## 6. Phase 1 results (macOS, x86_64)
 
