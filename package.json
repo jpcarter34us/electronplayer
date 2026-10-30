@@ -11,15 +11,65 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "build:audacious": "bash scripts/build-audacious.sh",
-    "build:native": "cd native && node-gyp rebuild --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers"
+    "build:native": "cd native && node-gyp rebuild --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers",
+    "dist:mac": "bash scripts/package-mac.sh"
   },
   "devDependencies": {
+    "@sendspin/sendspin-js": "5.0.0",
     "@types/node": "^22.0.0",
     "electron": "45.1.0",
+    "electron-builder": "26.17.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2"
   },
-  "dependencies": {
-    "@sendspin/sendspin-js": "5.0.0"
+  "build": {
+    "appId": "app.electronplayer",
+    "productName": "ElectronPlayer",
+    "copyright": "ElectronPlayer contributors; Audacious engine and plugins (c) Audacious developers",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "!dist/**/*.map",
+      "package.json"
+    ],
+    "extraFiles": [
+      {
+        "from": "build/stage/ElectronPlayer.app/Contents/Frameworks/engine",
+        "to": "Frameworks/engine",
+        "filter": [
+          "**/*",
+          "!*.dylib.dSYM"
+        ]
+      },
+      {
+        "from": "build/stage/ElectronPlayer.app/Contents/Resources/engine",
+        "to": "Resources/engine",
+        "filter": [
+          "locale/**",
+          "audacious/**"
+        ]
+      },
+      {
+        "from": "NOTICE",
+        "to": "Resources/NOTICE"
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.music",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "afterPack": "scripts/adhoc-sign.cjs",
+    "dmg": {
+      "title": "ElectronPlayer"
+    }
   }
 }

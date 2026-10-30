@@ -120,7 +120,7 @@ Totals: ~65 plugins run unchanged natively, ~25 need a web UI, ~8 map to Electro
 | 3. Platform integration | Tray, global hotkeys, notifications, MediaSession/MPRIS, file associations, drag and drop. Touch Bar controls done (`src/main/touchbar.ts`). | |
 | 4. Vis + General UIs | Spectrum, scope, VU, album art, lyrics, song info, history, playlist manager, file browser. **Done:** spectrum, blur scope, VU meter. | |
 | 5. Classic skins | `.wsz` loader, main/EQ/playlist windows, shade mode, docking | Default skins from `skins-data` render pixel-correct |
-| 6. Packaging | electron-builder for macOS (universal), Windows, Linux; bundle plugins and dylibs; codesign | Installable artifacts from CI |
+| 6. Packaging | electron-builder for macOS (universal), Windows, Linux; bundle plugins and dylibs; codesign. **Done for macOS (this Mac's architecture, ad-hoc signed):** `npm run dist:mac`; engine relocated into the bundle by build layout, Homebrew dylibs bundled and repointed, verified from outside the project. **Left:** Developer ID signing and notarization, Apple Silicon / universal, older macOS targets, Windows, Linux, CI. | Installable artifacts from CI |
 
 ## 6. Phase 1 results (macOS, x86_64)
 
@@ -129,7 +129,7 @@ Totals: ~65 plugins run unchanged natively, ~25 need a web UI, ~8 map to Electro
 - Verified end to end in Electron: add, play, pause, position updates, plugin listing, a clean shutdown that saves config, and playlist restore on the next launch.
 
 Findings:
-- **Install-path relocation.** libaudcore rewrites its plugin directory relative to the running executable (`set_install_paths` in `runtime.cc`). From `/usr/local/bin/node` it resolved to `/usr/local/lib/audacious`, a Homebrew Audacious install, and loaded incompatible plugins. Under Electron (`Electron.app/Contents/MacOS`) no rewrite happens, but packaging has to choose a layout on purpose, or upstream needs a plugin-dir override.
+- **Install-path relocation** (solved for packaging: the bundle build uses `--prefix=<…>/ElectronPlayer.app/Contents --bindir=MacOS --libdir=Frameworks/engine`, so relocation maps the plugin folder into the running app). libaudcore rewrites its plugin directory relative to the running executable (`set_install_paths` in `runtime.cc`). From `/usr/local/bin/node` it resolved to `/usr/local/lib/audacious`, a Homebrew Audacious install, and loaded incompatible plugins. Under Electron (`Electron.app/Contents/MacOS`) no rewrite happens, but packaging has to choose a layout on purpose, or upstream needs a plugin-dir override.
 - **Config isolation.** The addon sets `XDG_CONFIG_HOME` to Electron's `userData`, so a regular Audacious install's config and playlists stay untouched.
 - **First load.** The first-ever `init()` (macOS checking 50 newly built dylibs) took longer than 20 s once. Later starts take about 3 s.
 - **Deployment target.** Homebrew dylibs target the host macOS version. Shipping to older macOS needs dependencies built with `MACOSX_DEPLOYMENT_TARGET`.

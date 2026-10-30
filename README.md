@@ -37,6 +37,26 @@ npm start
 
 The status bar shows `libaudcore (plugin API …)` when the native engine is active. (When run from source, macOS shows "Electron" in the Dock; a packaged build shows "ElectronPlayer".) Without it the app falls back to the HTML5 stub, which plays MP3, FLAC, Ogg, Opus, WAV and AAC only.
 
+## Building the app (macOS)
+
+```bash
+npm run dist:mac
+```
+
+This produces `release/mac/ElectronPlayer.app`, `release/ElectronPlayer-<version>.dmg` and a `.zip`. Prerequisites are the same as for building the engine from source (Xcode command line tools, Homebrew, and the packages listed in `scripts/build-audacious.sh`). `scripts/package-mac.sh` runs these steps:
+
+1. Builds the TypeScript, the renderer bundles and (if needed) the native addon.
+2. `scripts/build-engine-bundle.sh` builds libaudcore and the plugins again, laid out as they sit inside the app (`Contents/Frameworks/engine`). libaudcore's own install-path relocation then finds its plugins in whichever `.app` it runs from, with no patch to Audacious.
+3. `scripts/bundle-dylibs.py` copies the Homebrew libraries the plugins use (44 of them, about 68 MB) into `Frameworks/engine/deps`, repoints every reference to `@executable_path/…`, and fails the build if anything still points outside the app.
+4. electron-builder assembles the app, and `scripts/adhoc-sign.cjs` signs it ad hoc.
+
+What the build is:
+- **For this Mac.** It is ad-hoc signed, so it runs here, but other Macs block it. To share it you need an Apple Developer ID to sign it and Apple notarization, plus a license decision: several plugins and Homebrew's FFmpeg are GPL, so a distributed build must be GPL-compatible.
+- **Intel only, macOS 26 or later.** It uses this Mac's architecture and the Homebrew libraries, which target the macOS version they were built on. An Apple Silicon build needs an Apple Silicon Mac; supporting older macOS needs the libraries built for an older deployment target.
+- **Keychain prompt.** The first time the app saves a sign-in (Music Assistant or Subsonic), macOS asks to let ElectronPlayer use its "ElectronPlayer Safe Storage" key. Choose **Always Allow**. Because each ad-hoc build has a new signature, a rebuilt app may ask again.
+- **No app icon yet** (Electron's default is used).
+- The SID plugin looks for optional C64 ROM files and a song-length database at a fixed build-time path, so it can't find them in the app (as before, without them SID files still play).
+
 ## Touch Bar
 
 On MacBook Pros with a Touch Bar, the app shows previous, play/pause and next buttons, the current song, a seek slider and a volume popover. The Touch Bar talks to libaudcore directly, so it appears only when the native engine is built, not with the HTML5 fallback.

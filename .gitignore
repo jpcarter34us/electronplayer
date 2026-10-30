@@ -4,3 +4,7 @@ native/build/
 vendor/build/
 vendor/prefix/
 .DS_Store
+build/
+release/
+build-engine.log
+dist-mac.log
