@@ -1,5 +1,5 @@
 import type { AudBackend, PlaybackState, Track } from '../shared/backend.js';
-import type { VisConfig, VisId } from '../shared/prefs.js';
+import type { VisId, VisSettings } from '../shared/prefs.js';
 import { Html5Backend } from './backends/html5.js';
 import { NativeBackend } from './backends/native.js';
 import './host.js';
@@ -53,15 +53,17 @@ async function main(): Promise<void> {
     list.querySelectorAll('li').forEach((li, i) => li.classList.toggle('current', i === state.position));
   };
 
-  // Visualizations (native engine only): one canvas per enabled visualizer.
+  // Visualizations (native engine only): one canvas per enabled visualizer,
+  // unless they are shown in separate windows (vis.ts).
   const visualizers = new Map<VisId, Visualizer>();
-  const showVis = (config: VisConfig) => {
+  const showVis = (settings: VisSettings) => {
+    const config = settings.enabled;
     for (const id of Object.keys(config) as VisId[]) {
-      if (config[id] && !visualizers.has(id)) {
+      if (config[id] && !settings.separate && !visualizers.has(id)) {
         const vis = createVisualizer(id);
         vis.canvas.className = `vis vis-${id}`;
         visualizers.set(id, vis);
-      } else if (!config[id]) visualizers.delete(id);
+      } else if (!config[id] || settings.separate) visualizers.delete(id);
     }
     const order: VisId[] = ['spectrum', 'scope', 'vu'];
     $('vis').replaceChildren(...order.filter((id) => visualizers.has(id)).map((id) => visualizers.get(id)!.canvas));

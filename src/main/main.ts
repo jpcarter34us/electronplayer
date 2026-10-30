@@ -7,7 +7,7 @@ import { createPlaybackTouchBar } from './touchbar';
 import { VisState } from './vis';
 import { openEqualizer, openPluginPrefs, openSettings } from './windows';
 import type { PlaybackState, PluginInfo, Track } from '../shared/backend';
-import type { VisId } from '../shared/prefs';
+import type { VisId, VisSettings } from '../shared/prefs';
 
 let playbackTouchBar: ReturnType<typeof createPlaybackTouchBar> | undefined;
 let mainWindow: BrowserWindow | undefined;
@@ -15,8 +15,9 @@ let mainWindow: BrowserWindow | undefined;
 // libaudcore keeps its config and playlists under $XDG_CONFIG_HOME/audacious;
 // point it at our own userData so a regular Audacious install is untouched.
 const native = loadNativeCore(app.getPath('userData'), (event) => {
-  // Vis frames arrive ~30 times a second; only the main window draws them.
-  const targets = event.type === 'vis' ? (mainWindow ? [mainWindow] : []) : BrowserWindow.getAllWindows();
+  // Vis frames arrive ~30 times a second; send them only to the windows
+  // drawing visualizers (the main window, or the separate vis windows).
+  const targets = event.type === 'vis' ? (vis?.targets(mainWindow) ?? []) : BrowserWindow.getAllWindows();
   for (const win of targets) if (!win.isDestroyed()) win.webContents.send('aud:event', event);
   playbackTouchBar?.update(event);
 });
@@ -118,8 +119,12 @@ ipcMain.handle('aud:choose-path', async (event, mode: 'file' | 'folder', current
   return result.canceled ? null : pathToFileURL(result.filePaths[0]).href;
 });
 
-ipcMain.handle('aud:vis-config', () => vis?.get() ?? { spectrum: false, scope: false, vu: false });
+ipcMain.handle('aud:vis-config', (): VisSettings =>
+  vis?.get() ?? { enabled: { spectrum: false, scope: false, vu: false }, separate: false, onTop: false });
 ipcMain.handle('aud:set-vis', (_event, id: VisId, on: boolean) => vis?.set(id, !!on));
+ipcMain.handle('aud:set-vis-option', (_event, option: 'separate' | 'onTop', on: boolean) => {
+  if (option === 'separate' || option === 'onTop') return vis?.setOption(option, !!on);
+});
 
 app.whenReady().then(() => {
   setUpTouchBar();

@@ -57,3 +57,12 @@ export interface PluginPrefsSession {
 /** Visualizers implemented in the renderer (ports of the GTK/Qt plugins). */
 export type VisId = 'spectrum' | 'scope' | 'vu';
 export type VisConfig = Record<VisId, boolean>;
+
+export interface VisSettings {
+  /** Which visualizers are on. */
+  enabled: VisConfig;
+  /** Each enabled visualizer in its own window instead of the main window. */
+  separate: boolean;
+  /** Separate visualizer windows float above other windows. */
+  onTop: boolean;
+}

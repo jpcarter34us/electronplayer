@@ -6,6 +6,15 @@ import path from 'node:path';
 
 const open = new Map<string, BrowserWindow>();
 
+/** Shared by every app window: the preload bridge, isolated and sandboxed. */
+export const webPreferences = (): Electron.WebPreferences => ({
+  preload: path.join(__dirname, '../preload/preload.js'),
+  contextIsolation: true,
+  sandbox: true,
+});
+
+export const rendererFile = (file: string) => path.join(__dirname, '../renderer', file);
+
 function show(
   key: string,
   file: string,
@@ -24,16 +33,12 @@ function show(
     backgroundColor: '#1e1f22',
     show: false,
     ...options,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-    },
+    webPreferences: webPreferences(),
   });
   open.set(key, win);
   win.on('closed', () => open.delete(key));
   win.once('ready-to-show', () => win.show());
-  win.loadFile(path.join(__dirname, '../renderer', file), hash ? { hash } : {});
+  win.loadFile(rendererFile(file), hash ? { hash } : {});
   return win;
 }
 

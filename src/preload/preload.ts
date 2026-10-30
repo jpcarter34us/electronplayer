@@ -27,9 +27,11 @@ const api = {
   /** Settings window: the main process asks to show another page. */
   onNavigate: (listener: (hash: string) => void): (() => void) => on('aud:navigate', listener),
 
-  visConfig: (): Promise<Record<string, boolean>> => ipcRenderer.invoke('aud:vis-config'),
+  /** { enabled: { spectrum, scope, vu }, separate, onTop } */
+  visConfig: (): Promise<unknown> => ipcRenderer.invoke('aud:vis-config'),
   setVis: (id: string, on: boolean): Promise<void> => ipcRenderer.invoke('aud:set-vis', id, on),
-  onVisConfig: (listener: (config: Record<string, boolean>) => void): (() => void) => on('aud:vis-config', listener),
+  setVisOption: (option: 'separate' | 'onTop', on: boolean): Promise<void> => ipcRenderer.invoke('aud:set-vis-option', option, on),
+  onVisConfig: (listener: (settings: unknown) => void): (() => void) => on('aud:vis-config', listener),
 };
 
 export type AudHostApi = typeof api;

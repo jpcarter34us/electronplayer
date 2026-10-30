@@ -1,5 +1,5 @@
 import type { Equalizer, EqPreset, PluginInfo } from '../shared/backend.js';
-import type { CfgType, PluginPrefsSession, PrefValue, VisConfig, VisId } from '../shared/prefs.js';
+import type { CfgType, PluginPrefsSession, PrefValue, VisId, VisSettings } from '../shared/prefs.js';
 
 /** The preload bridge (src/preload/preload.ts). */
 declare global {
@@ -14,9 +14,10 @@ declare global {
       pluginAbout(id: string): Promise<void>;
       choosePath(mode: 'file' | 'folder', current?: string): Promise<string | null>;
       onNavigate(listener: (hash: string) => void): () => void;
-      visConfig(): Promise<VisConfig>;
+      visConfig(): Promise<VisSettings>;
       setVis(id: VisId, on: boolean): Promise<void>;
-      onVisConfig(listener: (config: VisConfig) => void): () => void;
+      setVisOption(option: 'separate' | 'onTop', on: boolean): Promise<void>;
+      onVisConfig(listener: (settings: VisSettings) => void): () => void;
     };
   }
 }

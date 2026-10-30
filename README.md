@@ -46,4 +46,4 @@ With the native engine, the menu bar follows upstream Audacious: File, Playback,
 - **Settings** (Cmd+, on macOS, File › Settings… elsewhere): Audio, Network, Playlist, Song Info, Plugins and Advanced pages. The Plugins page turns plugins on and off by type and opens each plugin's settings, which are generated from the plugin's own declarations.
 - **Equalizer** (Output › Equalizer…, Cmd/Ctrl+E): 10 bands plus preamp, with presets saved to `eq.preset` like upstream.
 - **Effects** (Output › Effects…): the Plugins page's Effect tab.
-- **Visualizations** (View menu): Spectrum Analyzer, Blur Scope and VU Meter, drawn above the playlist.
+- **Visualizations** (View menu): Spectrum Analyzer, Blur Scope and VU Meter, drawn above the playlist. With View › Show Visualizations in Separate Windows (also on the Settings › Plugins › Visualization tab), each one opens in its own resizable window instead. You can keep those windows on top of other apps; closing one turns that visualizer off, and their positions are remembered.

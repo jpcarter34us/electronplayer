@@ -1,5 +1,5 @@
 import type { PluginInfo } from '../shared/backend.js';
-import type { PrefValue, PrefWidget, VisConfig, VisId } from '../shared/prefs.js';
+import type { PrefValue, PrefWidget, VisId, VisSettings } from '../shared/prefs.js';
 import { h, native } from './host.js';
 import { buildPrefs, type PrefsForm, type PrefsStore } from './prefs-form.js';
 import { PAGES, PLUGIN_TABS, TITLE_PRESETS } from './settings-pages.js';
@@ -70,6 +70,8 @@ function titleFormat(store: PrefsStore, form: PrefsForm): HTMLElement {
     h('div', { className: 'row' }, h('span', { className: 'row-label', textContent: 'Custom string:' }), h('span', { className: 'row-control' }, input)));
 }
 
+let visUnsubscribe: (() => void) | undefined;
+
 async function pluginsPage(tab: string): Promise<HTMLElement> {
   const bar = h('div', { className: 'tabs', role: 'tablist' });
   const panel = h('div', { className: 'tab-panel plugin-list' });
@@ -83,16 +85,30 @@ async function pluginsPage(tab: string): Promise<HTMLElement> {
   }
 
   if (current === 'vis') {
-    let config: VisConfig = await window.audHost.visConfig();
+    const settings = await window.audHost.visConfig();
     const rows = VISUALIZERS.map(([id, name, detail]) => {
-      const input = h('input', { type: 'checkbox', checked: config[id], onchange: () => window.audHost.setVis(id, input.checked) });
+      const input = h('input', { type: 'checkbox', checked: settings.enabled[id], onchange: () => window.audHost.setVis(id, input.checked) });
       return { id, input, el: h('div', { className: 'plugin' }, h('label', { className: 'check' }, input, h('span', {}, h('strong', { textContent: name }), h('small', { textContent: detail })))) };
     });
-    window.audHost.onVisConfig((c) => {
-      config = c;
-      rows.forEach((r) => (r.input.checked = config[r.id]));
-    });
-    panel.append(...rows.map((r) => r.el), h('p', { className: 'muted', textContent: 'Visualizations appear above the playlist in the main window.' }));
+    const separate = h('input', { type: 'checkbox', onchange: () => window.audHost.setVisOption('separate', separate.checked) });
+    const onTop = h('input', { type: 'checkbox', onchange: () => window.audHost.setVisOption('onTop', onTop.checked) });
+    const onTopBox = h('fieldset', { className: 'children' }, h('label', { className: 'check' }, onTop, h('span', { textContent: 'Keep visualization windows on top of other windows' })));
+    const note = h('p', { className: 'muted' });
+    const update = (s: VisSettings) => {
+      rows.forEach((r) => (r.input.checked = s.enabled[r.id]));
+      separate.checked = s.separate;
+      onTop.checked = s.onTop;
+      onTopBox.disabled = !s.separate;
+      note.textContent = s.separate
+        ? 'Each visualization opens in its own window; closing a window turns it off.'
+        : 'Visualizations appear above the playlist in the main window.';
+    };
+    update(settings);
+    visUnsubscribe?.();
+    visUnsubscribe = window.audHost.onVisConfig(update);
+    panel.append(...rows.map((r) => r.el),
+      h('div', { className: 'prefs vis-options' }, h('label', { className: 'check' }, separate, h('span', { textContent: 'Show visualizations in separate windows' })), onTopBox),
+      note);
   } else {
     const load = async () => {
       const plugins = (await native.listPlugins()).filter((p) => p.type === current).sort((a, b) => a.name.localeCompare(b.name));

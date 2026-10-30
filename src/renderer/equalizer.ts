@@ -34,21 +34,10 @@ async function main(): Promise<void> {
   let eq: Equalizer = await native.getEqualizer();
   let presets: EqPreset[] = await native.getEqPresets();
 
-  // Coalesce slider drags into one engine update per ~30 ms. (Not
-  // requestAnimationFrame: it is paused while the window is covered.)
-  let pending: Partial<Equalizer> = {};
-  let scheduled = false;
-  const push = (change: Partial<Equalizer>) => {
-    Object.assign(pending, change);
-    if (scheduled) return;
-    scheduled = true;
-    setTimeout(() => {
-      scheduled = false;
-      const change = pending;
-      pending = {};
-      void native.setEqualizer(change);
-    }, 30);
-  };
+  // Every change goes straight to the engine, as in upstream's equalizer.
+  // (Batching with requestAnimationFrame or timers stalls in background
+  // windows, where Chromium pauses or slows both.)
+  const push = (change: Partial<Equalizer>) => void native.setEqualizer(change);
 
   const active = $<HTMLInputElement>('active');
   active.onchange = () => push({ active: active.checked });

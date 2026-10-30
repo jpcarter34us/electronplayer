@@ -8,6 +8,8 @@ export interface Visualizer {
   readonly canvas: HTMLCanvasElement;
   render(frame: VisFrame): void;
   clear(): void;
+  /** Redraws the current state, e.g. after the canvas was resized. */
+  redraw(): void;
 }
 
 const accent = () => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#5b8def';
@@ -78,7 +80,12 @@ class Spectrum implements Visualizer {
     this.draw();
   }
 
+  redraw(): void {
+    this.draw();
+  }
+
   private draw(): void {
+    fit(this.canvas);
     const ctx = this.canvas.getContext('2d')!;
     const { width, height } = this.canvas;
     ctx.clearRect(0, 0, width, height);
@@ -122,6 +129,12 @@ class BlurScope implements Visualizer {
 
   clear(): void {
     this.image?.data.fill(0);
+    if (this.image) this.canvas.getContext('2d')!.putImageData(this.image, 0, 0);
+  }
+
+  // The trail buffer is tied to the canvas size, so a resize starts it afresh.
+  redraw(): void {
+    if (fit(this.canvas, 1)) this.image = new ImageData(this.canvas.width, this.canvas.height);
     if (this.image) this.canvas.getContext('2d')!.putImageData(this.image, 0, 0);
   }
 
@@ -179,6 +192,10 @@ class VuMeter implements Visualizer {
     this.level = [];
     this.peak = [];
     this.peakAge = [];
+    this.draw();
+  }
+
+  redraw(): void {
     this.draw();
   }
 
