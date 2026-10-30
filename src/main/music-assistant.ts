@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { MaLoginProvider, MaSettings, MaStatus } from '../shared/ma';
-import { httpBase, maAnonymousCommand, MaClient, type MaEvent } from './ma-client';
+import { httpBase, maAnonymousCommand, MaClient, type MaEvent, wsUrl } from './ma-client';
 
 // Music Assistant connection: settings, the encrypted token, sign-in, and
 // the commands the browser window may send.
@@ -37,10 +37,13 @@ const hostName = () => os.hostname().replace(/\.local$/, '');
 
 function loadSettings(): Omit<MaSettings, 'hasToken'> {
   const defaults: Omit<MaSettings, 'hasToken'> = {
-    server: '', sendspin: true, playerName: `ElectronPlayer (${hostName()})`, sendspinUrl: '', tokenKind: '', throughAudacious: false,
+    server: '', sendspin: true, playerName: `ElectronPlayer (${hostName()})`, sendspinRoute: 'server', sendspinUrl: '', tokenKind: '', throughAudacious: false,
   };
   try {
-    return { ...defaults, ...JSON.parse(readFileSync(settingsFile(), 'utf8')) };
+    const stored = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<MaSettings>;
+    // Settings from before the route choice: a typed address meant direct.
+    if (!stored.sendspinRoute) stored.sendspinRoute = stored.sendspinUrl ? 'direct' : 'server';
+    return { ...defaults, ...stored };
   } catch {
     return defaults;
   }
@@ -215,14 +218,21 @@ export class MusicAssistant {
     return this.client.command(command, args);
   }
 
-  /** Default Sendspin endpoint: the MA server's host, port 8927. */
-  sendspinUrl(): string {
-    if (this.settings.sendspinUrl) return this.settings.sendspinUrl;
-    if (!this.settings.server) return '';
+  /**
+   * Where the Sendspin player connects. Through the server: its /sendspin
+   * proxy next to /ws (same scheme, host, port and base path), which takes
+   * the session token as the first message. Direct: the given address, or
+   * the server's host on port 8927.
+   */
+  sendspinEndpoint(): { url: string; token?: string } {
+    if (!this.settings.server) return { url: this.settings.sendspinRoute === 'direct' ? this.settings.sendspinUrl : '' };
     try {
-      return `ws://${new URL(httpBase(this.settings.server)).hostname}:8927/sendspin`;
+      if (this.settings.sendspinRoute === 'server') {
+        return this.token ? { url: wsUrl(this.settings.server).replace(/\/ws$/, '/sendspin'), token: this.token } : { url: '' };
+      }
+      return { url: this.settings.sendspinUrl || `ws://${new URL(httpBase(this.settings.server)).hostname}:8927/sendspin` };
     } catch {
-      return '';
+      return { url: '' };
     }
   }
 

@@ -98,7 +98,11 @@ The app can browse and play a [Music Assistant](https://www.music-assistant.io) 
    Either way the app keeps only a session token, encrypted in the macOS Keychain, never your password. Session tokens renew themselves while used and expire after 90 days at most; the app then asks you to sign in again. **Sign Out** revokes the session on the server. A pasted long-lived token still works, under "Use a long-lived token instead".
 3. **File › Library…** (Cmd/Ctrl+Shift+M), or the ♫ button, opens the library: Artists, Albums, Tracks, Playlists, Radio, Podcasts, provider Browse and search. Each item has Play Now, Play Next and Add to Queue on the player chosen under **Play on**.
 
-**This computer as a speaker (Sendspin).** On by default once a server is set. The app joins Music Assistant as a player (named "Audacious (your computer)") using [Sendspin](https://www.sendspin-audio.com), Music Assistant's synchronized streaming protocol. The first time, Music Assistant may ask to pair it: the app shows a 6-digit code in Settings and in the main window, which you enter in Music Assistant.
+**This computer as a speaker (Sendspin).** On by default once a server is set. The app joins Music Assistant as a player (named "ElectronPlayer (your computer)") using [Sendspin](https://www.sendspin-audio.com), Music Assistant's synchronized streaming protocol. The first time, Music Assistant may ask to pair it: the app shows a 6-digit code in Settings and in the main window, which you enter in Music Assistant.
+
+Under **Connect the player**, choose how the player reaches the server:
+- **Through the Music Assistant server address** (the default). The player connects to the server's own `/sendspin` endpoint at the address you signed in with, the same way Music Assistant's web player does. It uses the same scheme, host, port and path, so `https://music.example.com` becomes `wss://music.example.com/sendspin`. It signs in with your session, then the server relays the Sendspin stream. This works anywhere the server's web address does, including over the internet behind a reverse proxy with https, and needs nothing but the web port open. Requires Music Assistant 2.7 or later.
+- **Directly to the Sendspin port.** The player connects straight to Sendspin, by default port 8927 on the server, or the address you enter (e.g. `ws://192.168.1.20:8927/sendspin`). This is for your local network, and is how earlier versions of this app connected; settings from those versions keep using it if they had an address filled in.
 
 While Music Assistant plays here, the main window, the menus and the Touch Bar show and control its queue. Playing a local file pauses Music Assistant and hands control back.
 
@@ -110,9 +114,19 @@ Notes:
 
 **Settings › Subsonic**: enter the server address (e.g. `http://navidrome.local:4533`) with your username and password, or an API key if your server supports OpenSubsonic API keys (the app tells you when it does). Credentials are stored encrypted in the Keychain. Requests use the salted-token scheme, never the plain password.
 
-In the Library window, switch the source to **Subsonic** for Artists, Albums, Recently Added, Playlists, Starred, Random Songs and search. Songs go into the Audacious playlist and play through the Audacious engine, so effects, the equalizer and visualizations apply. Plays are reported back to the server ("now playing", then a full play at half the song or 4 minutes).
+In the Library window, switch the source to **Subsonic** for Artists, Albums, Songs, Recently Added, Playlists, Starred, Random Songs and search. **Songs** lists your whole library, 100 at a time (Load More adds the next page). While Songs is selected, the search box searches songs only, with paged results; elsewhere it searches artists, albums and songs. Song lists have **Play All** and **Add All** for the songs loaded so far. Songs go into the Audacious playlist and play through the Audacious engine, so effects, the equalizer and visualizations apply. Plays are reported back to the server ("now playing", then a full play at half the song or 4 minutes).
 
 Subsonic puts credentials in every stream URL, and Audacious saves playlist URLs to disk, so saved playlists hold local addresses (`http://127.0.0.1:<port>/subsonic/<key>/…`) and a small proxy in the app adds your credentials to each request. Saved Subsonic songs therefore play only while the app is running.
+
+## DAAP (iTunes sharing)
+
+DAAP is the protocol iTunes used to share libraries on a local network. Servers that still speak it include [OwnTone](https://owntone.github.io/owntone-server/) (formerly forked-daapd), Firefly (mt-daapd), Rhythmbox's library sharing and Ampache.
+
+**Settings › DAAP Sharing** lists the shared libraries the app finds on your network with Bonjour (on by default; **Search Again** looks again). You can also add one by address (`owntone.local`, `192.168.1.20:3689`). In the Library window, switch the source to **DAAP** and pick a library under **Library**. You can browse Songs, Artists, Albums, Genres and Playlists, and search. DAAP servers can't browse or search for you, so the app loads the song list once per library and groups and searches it locally. A library with a password asks for it in the Library window, then stores it encrypted in the Keychain. **Forget Password** in Settings removes it.
+
+Songs play through the Audacious engine, like Subsonic. As with Subsonic, saved playlists hold local proxy addresses (`http://127.0.0.1:<port>/daap/<key>/<library>/…`), because song addresses need the server session, which expires. The proxy signs in again whenever needed, so saved DAAP songs play while the app is running and the library is reachable.
+
+Not supported: libraries shared by iTunes 7 or later and by the Music app. They only accept requests signed with Apple's proprietary scheme, which this app doesn't implement. Home Sharing isn't supported either.
 
 ## Renamed from "Audacious for Electron"
 

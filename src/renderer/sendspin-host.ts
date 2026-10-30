@@ -1,4 +1,4 @@
-import { SendspinCore, SendspinPlayer, type SendspinPlayerConfig } from '@sendspin/sendspin-js';
+import { loadSendspinClientIdentity, SendspinCore, SendspinPlayer, type SendspinPlayerConfig } from '@sendspin/sendspin-js';
 import type { SendspinState } from '../shared/ma.js';
 
 // Runs in a hidden window (src/main/sendspin.ts): a Sendspin player that
@@ -11,9 +11,18 @@ import type { SendspinState } from '../shared/ma.js';
 //    the main process stamped with the local time it should be heard, and
 //    libaudcore plays it (src/main/sendspin-live.ts), so Audacious effects,
 //    the equalizer and visualizations apply.
+//
+// Two ways to reach the server:
+//  - Direct: sendspin-js connects to the Sendspin port (8927) itself.
+//  - Through Music Assistant's address (config.token set): its /sendspin
+//    proxy (music_assistant/controllers/webserver/sendspin_proxy.py) wants
+//    {"type": "auth", "token", "client_id"} first and answers auth_ok, then
+//    relays Sendspin unchanged. This page does that handshake and hands the
+//    open socket to sendspin-js. sendspin-js does not reconnect sockets it
+//    did not open, so a dropped connection reloads the page (with backoff).
 
 interface HostBridge {
-  sendspinConfig(): Promise<{ url: string; name: string; throughAudacious: boolean }>;
+  sendspinConfig(): Promise<{ url: string; name: string; throughAudacious: boolean; token?: string }>;
   sendspinState(state: Partial<SendspinState>): void;
   sendspinStream(event: { event: 'start' | 'clear' | 'end'; rate?: number; channels?: number }): void;
   sendspinPcm(chunk: { playAt: number; rate: number; channels: number; pcm: ArrayBuffer }): void;
@@ -43,8 +52,49 @@ function toInt16(samples: Float32Array[], gain: number): ArrayBuffer {
   return out.buffer;
 }
 
+const RETRY_KEY = 'sendspin-proxy-retries';
+const retries = () => Number(sessionStorage.getItem(RETRY_KEY) ?? 0);
+
+/** Reloads the page to reconnect: soon after a working connection, backing off after failures. */
+function reconnectLater(failed: boolean): void {
+  const attempt = failed ? retries() + 1 : 0;
+  sessionStorage.setItem(RETRY_KEY, String(attempt));
+  setTimeout(() => location.reload(), Math.min(15_000, 1000 * 2 ** Math.max(0, attempt - 1)));
+}
+
+/** Opens Music Assistant's /sendspin proxy and signs in; resolves with the socket ready for Sendspin. */
+function openProxy(url: string, token: string, clientId: string): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new Error('Music Assistant did not answer the sign-in'));
+    }, 15_000);
+    const fail = (message: string) => {
+      clearTimeout(timer);
+      reject(new Error(message));
+    };
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token, client_id: clientId }));
+    ws.onmessage = (event) => {
+      let msg: { type?: string } = {};
+      try {
+        msg = JSON.parse(String(event.data));
+      } catch {}
+      if (msg.type !== 'auth_ok') return;
+      clearTimeout(timer);
+      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      resolve(ws);
+    };
+    ws.onerror = () => fail(`Cannot reach ${url}`);
+    ws.onclose = (event) =>
+      fail(event.code === 4001 ? `Music Assistant refused the sign-in (${event.reason || 'invalid token'})`
+        : event.code === 1006 ? `Cannot reach ${url}`
+        : `Music Assistant closed the connection (${event.code}${event.reason ? `: ${event.reason}` : ''})`);
+  });
+}
+
 async function main(): Promise<void> {
-  const { url, name, throughAudacious } = await host.sendspinConfig();
+  const { url, name, throughAudacious, token } = await host.sendspinConfig();
   let pairingCode: string | null = null;
   let connection: SendspinState['connection'] = 'connecting';
   let error: string | undefined;
@@ -54,10 +104,26 @@ async function main(): Promise<void> {
   let progressKey = '';
   let progressAt = 0;
 
+  // Through Music Assistant: sign in on our own socket first.
+  let socket: WebSocket | undefined;
+  if (token) {
+    const identity = loadSendspinClientIdentity(localStorage);
+    report({ clientId: identity.clientId });
+    try {
+      socket = await openProxy(url, token, identity.clientId);
+    } catch (err) {
+      connection = 'error';
+      error = (err as Error).message;
+      report();
+      reconnectLater(true);
+      return;
+    }
+  }
+
   // eslint-disable-next-line prefer-const
   let client: Client;
   const config: SendspinPlayerConfig = {
-    baseUrl: url,
+    ...(socket ? { webSocket: socket } : { baseUrl: url }),
     clientName: name,
     productName: 'ElectronPlayer',
     // Persist identity and pairing (sendspin-js keeps them in memory otherwise).
@@ -162,6 +228,17 @@ async function main(): Promise<void> {
     error = (err as Error).message;
   }
   report({ clientId: client.clientId });
+  if (socket) {
+    if (connection === 'connected') sessionStorage.setItem(RETRY_KEY, '0');
+    const opened = connection === 'connected';
+    const reconnect = () => {
+      connection = 'connecting';
+      report({ playing: false, speed: 0 });
+      reconnectLater(!opened);
+    };
+    if (socket.readyState >= WebSocket.CLOSING) reconnect();
+    else socket.addEventListener('close', reconnect);
+  }
 
   window.addEventListener('pagehide', () => client.disconnect('shutdown'));
 }

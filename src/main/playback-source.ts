@@ -147,7 +147,8 @@ export class PlaybackSources {
   private applySendspin(settings: MaSettings): void {
     const throughAudacious = settings.throughAudacious && !!this.live;
     if (!throughAudacious) void this.live?.end();
-    this.sendspin.apply(settings.sendspin, this.ma.sendspinUrl(), settings.playerName, throughAudacious);
+    const { url, token } = this.ma.sendspinEndpoint();
+    this.sendspin.apply(settings.sendspin, url, settings.playerName, throughAudacious, token);
   }
 
   private registerIpc(): void {
@@ -164,6 +165,7 @@ export class PlaybackSources {
       if (typeof update.sendspin === 'boolean') clean.sendspin = update.sendspin;
       if (typeof update.playerName === 'string') clean.playerName = update.playerName.trim() || this.ma.getSettings().playerName;
       if (typeof update.sendspinUrl === 'string') clean.sendspinUrl = update.sendspinUrl.trim();
+      if (update.sendspinRoute === 'server' || update.sendspinRoute === 'direct') clean.sendspinRoute = update.sendspinRoute;
       if (typeof update.throughAudacious === 'boolean') clean.throughAudacious = update.throughAudacious;
       return this.ma.configure(clean);
     });

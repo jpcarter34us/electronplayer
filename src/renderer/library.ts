@@ -1,13 +1,15 @@
 import type { MaImage, MaItem, MaPlayer, MaSettings, MaStatus, SendspinState } from '../shared/ma.js';
+import type { DaapShare, DaapSong, DaapStatus } from '../shared/daap.js';
 import type { SubsonicSong, SubsonicStatus } from '../shared/subsonic.js';
 import { h } from './host.js';
 
-// The Library window: browse Music Assistant or an OpenSubsonic server
-// (Navidrome, ...). Music Assistant plays on any of its players (this
-// computer's Sendspin player by default); Subsonic songs go into the local
-// ElectronPlayer playlist. The location hash picks the source: #ma or #subsonic.
+// The Library window: browse Music Assistant, an OpenSubsonic server
+// (Navidrome, ...) or a DAAP share (iTunes sharing). Music Assistant plays on
+// any of its players (this computer's Sendspin player by default); Subsonic
+// and DAAP songs go into the local ElectronPlayer playlist. The location hash
+// picks the source: #ma, #subsonic or #daap.
 
-type SourceId = 'ma' | 'subsonic';
+type SourceId = 'ma' | 'subsonic' | 'daap';
 type Option = 'play' | 'next' | 'add';
 type Layout = 'grid' | 'list';
 
@@ -29,6 +31,8 @@ interface View {
   layout: Layout;
   load(offset: number): Promise<Item[]>;
   sections?: () => Promise<[string, Item[], Layout][]>;
+  /** Plays everything loaded so far (song lists). */
+  playAll?: (option: Option) => Promise<string>;
 }
 
 interface Source {
@@ -38,9 +42,12 @@ interface Source {
   status(): string;
   settingsPage: string;
   sections(): [string, () => View][];
-  search(query: string): View;
+  /** `within`: the section shown when typing (e.g. "Songs" searches songs only). */
+  search(query: string, within?: string): View;
   /** Shown next to the search box: where items play. */
   target(): HTMLElement;
+  /** Shown instead of the status line while not connected (e.g. a password prompt). */
+  disconnected?(): HTMLElement | undefined;
 }
 
 const PAGE = 100;
@@ -198,6 +205,36 @@ function ssPlaylist(p: SsPlaylist): Item {
   };
 }
 
+/**
+ * Every song, or the songs matching `query`, a page at a time: search3 with
+ * only songs requested. OpenSubsonic servers return everything for an empty
+ * query; older ones want a literal "" instead.
+ */
+function ssSongs(query: string): View {
+  const loaded: SubsonicSong[] = [];
+  let emptyQuery = '';
+  const page = async (offset: number) =>
+    (await ssCall<{ searchResult3: { song?: SubsonicSong[] } }>('search3', { query: query || emptyQuery, songCount: PAGE, songOffset: offset, artistCount: 0, albumCount: 0 })).searchResult3.song ?? [];
+  return {
+    title: query ? `Songs: ${query}` : 'Songs',
+    layout: 'list',
+    load: async (offset) => {
+      let songs = await page(offset).catch((err) => {
+        if (query || offset) throw err;
+        return [] as SubsonicSong[];
+      });
+      if (!songs.length && !query && !offset && !emptyQuery) {
+        emptyQuery = '""';
+        songs = await page(0);
+      }
+      if (!offset) loaded.length = 0;
+      loaded.push(...songs);
+      return songs.map(ssSong);
+    },
+    playAll: (o) => ssPlay(loaded, o),
+  };
+}
+
 const subsonicSource: Source = {
   id: 'subsonic',
   label: 'Subsonic',
@@ -213,6 +250,7 @@ const subsonicSource: Source = {
       title: 'Albums', layout: 'grid',
       load: async (offset) => ((await ssCall<{ albumList2: { album?: SsAlbum[] } }>('getAlbumList2', { type: 'alphabeticalByName', size: PAGE, offset })).albumList2.album ?? []).map(ssAlbum),
     })],
+    ['Songs', () => ssSongs('')],
     ['Recently Added', () => ({
       title: 'Recently Added', layout: 'grid',
       load: async (offset) => ((await ssCall<{ albumList2: { album?: SsAlbum[] } }>('getAlbumList2', { type: 'newest', size: PAGE, offset })).albumList2.album ?? []).map(ssAlbum),
@@ -233,7 +271,7 @@ const subsonicSource: Source = {
       load: async (o) => (o ? [] : ((await ssCall<{ randomSongs: { song?: SubsonicSong[] } }>('getRandomSongs', { size: 50 })).randomSongs.song ?? []).map(ssSong)),
     })],
   ],
-  search: (query) => ({
+  search: (query, within) => within === 'Songs' ? ssSongs(query) : ({
     title: `Search: ${query}`, layout: 'grid', load: async () => [],
     sections: async () => {
       const r = (await ssCall<{ searchResult3: { artist?: SsArtist[]; album?: SsAlbum[]; song?: SubsonicSong[] } }>('search3', { query, artistCount: 20, albumCount: 20, songCount: 50 })).searchResult3;
@@ -243,9 +281,184 @@ const subsonicSource: Source = {
   target: () => h('span', { className: 'ma-player', textContent: 'Plays in ElectronPlayer' }),
 };
 
+// ===================== DAAP (iTunes sharing) =====================
+
+// DAAP has no server-side browsing or search: the whole song list comes
+// once per share, and artists, albums, genres and searches are made here.
+
+let daapStatus: DaapStatus = { state: 'disconnected' };
+let daapShares: DaapShare[] = [];
+let daapSongs: DaapSong[] | null = null;
+const shareSelect = h('select', { id: 'share', ariaLabel: 'Shared library' });
+const daapArt = (id?: number) => (id !== undefined && daapStatus.proxyBase ? `${daapStatus.proxyBase}/art/${id}` : undefined);
+
+async function allDaapSongs(): Promise<DaapSong[]> {
+  daapSongs ??= await window.audHost.daapSongs();
+  return daapSongs;
+}
+
+const daapPlay = async (songs: DaapSong[], option: Option) => {
+  await window.audHost.daapPlay(songs, option);
+  return 'this computer';
+};
+
+const byDisc = (a: DaapSong, b: DaapSong) => (a.disc ?? 0) - (b.disc ?? 0) || (a.track ?? 0) - (b.track ?? 0) || a.title.localeCompare(b.title);
+const artistOf = (s: DaapSong) => s.albumArtist || s.artist || 'Unknown Artist';
+const matches = (q: string, ...fields: (string | undefined)[]) => fields.some((f) => f?.toLowerCase().includes(q));
+
+function daapSong(s: DaapSong): Item {
+  return { name: s.title, kind: 'song', subtitle: [s.artist, s.album].filter(Boolean).join(' · '), duration: s.duration, image: daapArt(s.id), play: (o) => daapPlay([s], o) };
+}
+
+interface DaapAlbum { name: string; artist: string; songs: DaapSong[] }
+
+function daapAlbums(songs: DaapSong[]): DaapAlbum[] {
+  const albums = new Map<string, DaapAlbum>();
+  for (const s of songs) {
+    if (!s.album) continue;
+    const key = `${artistOf(s)}\n${s.album}`;
+    let a = albums.get(key);
+    if (!a) albums.set(key, (a = { name: s.album, artist: artistOf(s), songs: [] }));
+    a.songs.push(s);
+  }
+  return [...albums.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function daapAlbum(a: DaapAlbum): Item {
+  const songs = [...a.songs].sort(byDisc);
+  const year = songs.find((s) => s.year)?.year;
+  return {
+    name: a.name, kind: 'album', subtitle: [a.artist, year].filter(Boolean).join(' · '), image: daapArt(songs[0]?.id),
+    open: () => ({ title: a.name, layout: 'list', load: async (o) => (o ? [] : songs.map(daapSong)), playAll: (opt) => daapPlay(songs, opt) }),
+    play: (o) => daapPlay(songs, o),
+  };
+}
+
+function daapArtist(name: string, songs: DaapSong[]): Item {
+  const albums = daapAlbums(songs);
+  return {
+    name, kind: 'artist', subtitle: `${albums.length || songs.length} ${albums.length ? (albums.length === 1 ? 'album' : 'albums') : (songs.length === 1 ? 'song' : 'songs')}`,
+    image: daapArt(albums[0]?.songs[0]?.id ?? songs[0]?.id),
+    open: () => ({
+      title: name, layout: 'grid', load: async () => [],
+      sections: async () => [['Albums', albums.map(daapAlbum), 'grid'], ['Songs', [...songs].sort(byDisc).map(daapSong), 'list']],
+    }),
+  };
+}
+
+function groupBy(songs: DaapSong[], key: (s: DaapSong) => string | undefined): [string, DaapSong[]][] {
+  const groups = new Map<string, DaapSong[]>();
+  for (const s of songs) {
+    const k = key(s);
+    if (k) groups.set(k, [...(groups.get(k) ?? []), s]);
+  }
+  return [...groups].sort(([a], [b]) => a.localeCompare(b));
+}
+
+/** Every song, or those matching `query`, a page at a time. */
+function daapSongsView(query: string): View {
+  let list: DaapSong[] = [];
+  return {
+    title: query ? `Songs: ${query}` : 'Songs',
+    layout: 'list',
+    load: async (offset) => {
+      if (!offset) {
+        const q = query.toLowerCase();
+        list = (await allDaapSongs()).filter((s) => !q || matches(q, s.title, s.artist, s.album, s.albumArtist, s.genre))
+          .sort((a, b) => artistOf(a).localeCompare(artistOf(b)) || (a.album ?? '').localeCompare(b.album ?? '') || byDisc(a, b));
+      }
+      return list.slice(offset, offset + PAGE).map(daapSong);
+    },
+    playAll: (o) => daapPlay(list.slice(0, document.querySelectorAll('.ma-row').length), o),
+  };
+}
+
+const shareLabel = (s: DaapShare) => s.name + (s.needsPassword && !s.hasPassword ? ' 🔒' : '');
+
+function renderShares() {
+  const current = daapStatus.share?.id ?? '';
+  const known = daapShares.some((s) => s.id === current);
+  shareSelect.replaceChildren(
+    h('option', { value: '', textContent: daapShares.length ? 'Choose a shared library…' : 'No shared libraries found' }),
+    ...daapShares.map((s) => h('option', { value: s.id, textContent: shareLabel(s) })),
+    ...(current && !known ? [h('option', { value: current, textContent: daapStatus.share?.name ?? current })] : []));
+  shareSelect.value = current;
+}
+shareSelect.onchange = () => {
+  if (shareSelect.value) void window.audHost.daapConnect(shareSelect.value);
+  else void window.audHost.daapDisconnect();
+};
+
+const daapSource: Source = {
+  id: 'daap',
+  label: 'DAAP',
+  connected: () => daapStatus.state === 'connected',
+  status: () =>
+    daapStatus.state === 'connecting' ? `Opening ${daapStatus.share?.name ?? 'the shared library'}…`
+    : daapStatus.error ? `${daapStatus.share?.name ?? 'Shared library'}: ${daapStatus.error}`
+    : daapShares.length ? 'Choose a shared library above.' : 'No shared libraries found on the network. Add one by address in Settings.',
+  settingsPage: 'daap',
+  sections: () => [
+    ['Songs', () => daapSongsView('')],
+    ['Artists', () => ({ title: 'Artists', layout: 'grid', load: async (o) => (o ? [] : groupBy(await allDaapSongs(), artistOf).map(([n, s]) => daapArtist(n, s))) })],
+    ['Albums', () => ({ title: 'Albums', layout: 'grid', load: async (o) => (o ? [] : daapAlbums(await allDaapSongs()).map(daapAlbum)) })],
+    ['Genres', () => ({
+      title: 'Genres', layout: 'list',
+      load: async (o) => (o ? [] : groupBy(await allDaapSongs(), (s) => s.genre).map(([name, songs]): Item => ({
+        name, kind: 'folder', subtitle: `${songs.length} song${songs.length === 1 ? '' : 's'}`,
+        open: () => ({ title: name, layout: 'grid', load: async () => daapAlbums(songs).map(daapAlbum) }),
+        play: (opt) => daapPlay(songs, opt),
+      }))),
+    })],
+    ['Playlists', () => ({
+      title: 'Playlists', layout: 'list',
+      load: async (o) => (o ? [] : (await window.audHost.daapPlaylists()).map((p): Item => {
+        const songs = () => window.audHost.daapPlaylistSongs(p.id);
+        return {
+          name: p.name, kind: 'playlist', subtitle: [p.count !== undefined ? `${p.count} songs` : '', p.smart ? 'Smart playlist' : ''].filter(Boolean).join(' · '),
+          open: () => {
+            let loaded: DaapSong[] = [];
+            return { title: p.name, layout: 'list', load: async (off) => (off ? [] : (loaded = await songs()).map(daapSong)), playAll: (opt) => daapPlay(loaded, opt) };
+          },
+          play: async (opt) => daapPlay(await songs(), opt),
+        };
+      })),
+    })],
+  ],
+  search: (query, within) => within === 'Songs' ? daapSongsView(query) : ({
+    title: `Search: ${query}`, layout: 'grid', load: async () => [],
+    sections: async () => {
+      const q = query.toLowerCase();
+      const all = await allDaapSongs();
+      const artists = groupBy(all, artistOf).filter(([n]) => matches(q, n)).slice(0, 30).map(([n, songs]) => daapArtist(n, songs));
+      const albums = daapAlbums(all).filter((a) => matches(q, a.name)).slice(0, 30).map(daapAlbum);
+      const songs = all.filter((s) => matches(q, s.title)).slice(0, PAGE).map(daapSong);
+      return [['Artists', artists, 'grid'], ['Albums', albums, 'grid'], ['Songs', songs, 'list']];
+    },
+  }),
+  target: () => h('label', { className: 'ma-player' }, 'Library ', shareSelect),
+  disconnected: () => {
+    if (!daapStatus.needsPassword || !daapStatus.share) return undefined;
+    const share = daapStatus.share;
+    const password = h('input', { type: 'password', placeholder: 'Library password', autocomplete: 'current-password' });
+    const open = h('button', { className: 'primary', textContent: 'Open' });
+    open.onclick = async () => {
+      open.disabled = true;
+      await window.audHost.daapConnect(share.id, password.value).finally(() => (open.disabled = false));
+    };
+    password.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') open.click();
+    };
+    setTimeout(() => password.focus());
+    return h('div', { className: 'ma-empty' },
+      h('p', { textContent: `${share.name}: ${daapStatus.error ?? 'This library needs a password'}` }),
+      h('div', { className: 'row' }, password, open));
+  },
+};
+
 // ===================== Window =====================
 
-const SOURCES: Source[] = [maSource, subsonicSource];
+const SOURCES: Source[] = [maSource, subsonicSource, daapSource];
 let source: Source = SOURCES[0];
 let stack: View[] = [];
 
@@ -319,11 +532,13 @@ async function render() {
   const view = stack[stack.length - 1];
   $<HTMLButtonElement>('back').disabled = stack.length < 2;
   $('title').textContent = view?.title ?? source.label;
-  document.querySelectorAll<HTMLButtonElement>('#nav .section').forEach((b) => b.setAttribute('aria-current', String(stack.length === 1 && b.textContent === view?.title)));
+  document.querySelectorAll<HTMLButtonElement>('#nav .section').forEach((b) => b.setAttribute('aria-current', String(stack.length === 1 && (b.textContent === view?.title || b.textContent === searchWithin))));
   document.querySelectorAll<HTMLButtonElement>('#sources button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.source === source.id)));
   $('target').replaceChildren(source.target());
 
   if (!source.connected()) {
+    const custom = source.disconnected?.();
+    if (custom) return void content.replaceChildren(custom);
     content.replaceChildren(h('div', { className: 'ma-empty' },
       h('p', { textContent: source.status() }),
       h('button', { className: 'primary', textContent: `${source.label} Settings…`, onclick: () => window.audHost.openWindow('settings', source.settingsPage) })));
@@ -345,6 +560,22 @@ async function render() {
     const items = await view.load(0);
     if (token !== renderToken) return;
     content.replaceChildren(items.length ? renderItems(items, view.layout) : h('p', { className: 'muted', textContent: 'Nothing here.' }));
+    if (view.playAll && items.length) {
+      const all = (label: string, option: Option) => h('button', {
+        textContent: label,
+        onclick: async () => {
+          const count = content.querySelectorAll('.ma-row').length;
+          try {
+            const where = await view.playAll!(option);
+            toast(`${option === 'play' ? 'Playing' : 'Added'} ${count} song${count === 1 ? '' : 's'} on ${where}`);
+          } catch (err) {
+            toast((err as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
+          }
+        },
+      });
+      content.prepend(h('div', { className: 'lib-toolbar' }, all('▶ Play All', 'play'), all('+ Add All', 'add'),
+        h('span', { className: 'muted', textContent: items.length >= PAGE ? 'Loaded songs only; Load More adds the next page.' : '' })));
+    }
     if (items.length >= PAGE) {
       const more = h('button', { textContent: 'Load More', className: 'ma-more' });
       more.onclick = async () => {
@@ -372,15 +603,30 @@ function setRoot(view: View) {
   void render();
 }
 
+/** Sections whose search box searches within them, by source. */
+const SEARCH_WITHIN: Record<SourceId, string[]> = { ma: [], subsonic: ['Songs'], daap: ['Songs'] };
+let searchWithin = '';
+function setSearchWithin(section: string) {
+  const input = $<HTMLInputElement>('search');
+  searchWithin = SEARCH_WITHIN[source.id].includes(section) ? section : '';
+  input.value = '';
+  input.placeholder = searchWithin ? `Search ${searchWithin}` : `Search ${source.label}`;
+}
+
 function selectSource(id: string) {
   source = SOURCES.find((s) => s.id === id) ?? SOURCES[0];
   localStorage.setItem('library-source', source.id);
   if (location.hash.slice(1) !== source.id) history.replaceState(null, '', `#${source.id}`);
-  $<HTMLInputElement>('search').value = '';
-  $<HTMLInputElement>('search').placeholder = `Search ${source.label}`;
   const nav = $('nav-sections');
   const sections = source.sections();
-  nav.replaceChildren(...sections.map(([title, make]) => h('button', { className: 'section', textContent: title, onclick: () => setRoot(make()) })));
+  nav.replaceChildren(...sections.map(([title, make]) => h('button', {
+    className: 'section', textContent: title,
+    onclick: () => {
+      setRoot(make());
+      setSearchWithin(title);
+    },
+  })));
+  setSearchWithin(sections[0]?.[0] ?? '');
   stack = sections.length ? [sections[0][1]()] : [];
   void render();
 }
@@ -388,6 +634,8 @@ function selectSource(id: string) {
 async function main() {
   ({ settings: maSettings, status: maStatus, sendspin } = await window.audHost.maState());
   ssStatus = (await window.audHost.subsonicState()).status;
+  ({ status: daapStatus, shares: daapShares } = await window.audHost.daapState());
+  renderShares();
 
   $('sources').append(...SOURCES.map((s) => {
     const b = h('button', { textContent: s.label, role: 'tab', onclick: () => selectSource(s.id) });
@@ -402,7 +650,12 @@ async function main() {
   const input = $<HTMLInputElement>('search');
   input.oninput = () => {
     clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(() => (input.value.trim() ? setRoot(source.search(input.value.trim())) : selectSource(source.id)), 350);
+    searchTimer = window.setTimeout(() => {
+      const query = input.value.trim();
+      if (query) setRoot(source.search(query, searchWithin));
+      else if (searchWithin) setRoot(source.sections().find(([t]) => t === searchWithin)![1]());
+      else selectSource(source.id);
+    }, 350);
   };
 
   const refreshIfShowing = (id: SourceId, was: string, now: string) => {
@@ -434,6 +687,21 @@ async function main() {
     const was = ssStatus.state;
     ssStatus = s;
     refreshIfShowing('subsonic', was, s.state);
+  });
+  window.audHost.onDaapStatus((s) => {
+    const was = daapStatus;
+    daapStatus = s;
+    if (s.share?.id !== was.share?.id || s.state !== was.state) daapSongs = null;
+    renderShares();
+    if (source.id === 'daap') {
+      if (s.state === 'connected' && (was.state !== 'connected' || s.share?.id !== was.share?.id)) selectSource('daap');
+      else if (s.state !== was.state || s.error !== was.error) void render();
+    }
+  });
+  window.audHost.onDaapShares((shares) => {
+    daapShares = shares;
+    renderShares();
+    if (source.id === 'daap' && !source.connected()) void render();
   });
   window.audHost.onNavigate((hash) => selectSource(hash));
   window.addEventListener('hashchange', () => selectSource(location.hash.slice(1)));

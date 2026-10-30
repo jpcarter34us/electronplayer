@@ -10,7 +10,14 @@ export interface MaSettings {
   sendspin: boolean;
   /** Name shown for this player in Music Assistant. */
   playerName: string;
-  /** Override for the Sendspin endpoint; default ws://<server host>:8927/sendspin. */
+  /**
+   * How the Sendspin player reaches the server: 'server' through Music
+   * Assistant's own address (its authenticated /sendspin proxy, so it works
+   * wherever the server's http/https address does), or 'direct' to the
+   * Sendspin port.
+   */
+  sendspinRoute: 'server' | 'direct';
+  /** For 'direct': the Sendspin endpoint; default ws://<server host>:8927/sendspin. */
   sendspinUrl: string;
   /** What the stored token is: a sign-in session (renews itself) or a pasted long-lived token. */
   tokenKind: '' | 'session' | 'long-lived';

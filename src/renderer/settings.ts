@@ -74,6 +74,85 @@ let visUnsubscribe: (() => void) | undefined;
 let maUnsubscribe: (() => void)[] = [];
 
 let ssUnsubscribe: (() => void)[] = [];
+let daapUnsubscribe: (() => void)[] = [];
+
+// DAAP (iTunes sharing): shares found with Bonjour or added by address.
+async function daapPage(): Promise<HTMLElement> {
+  const state = await window.audHost.daapState();
+  let { settings, status, shares } = state;
+  const discover = h('input', { type: 'checkbox', checked: settings.discover });
+  const refresh = h('button', { textContent: 'Search Again' });
+  const address = h('input', { type: 'text', placeholder: 'owntone.local or 192.168.1.20:3689', spellcheck: false });
+  const add = h('button', { textContent: 'Add' });
+  const list = h('div', { className: 'daap-shares' });
+  const statusLine = h('p', { className: 'ma-status' });
+  const openLibrary = h('button', { textContent: 'Open Library…', onclick: () => window.audHost.openWindow('library', 'daap') });
+  const message = (err: unknown) => (err as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+
+  const render = () => {
+    statusLine.dataset.state = status.state;
+    statusLine.textContent =
+      status.state === 'connected' ? `Open: ${status.share?.name} · ${status.songCount ?? 0} songs`
+      : status.state === 'connecting' ? `Opening ${status.share?.name ?? ''}…`
+      : status.error ? `${status.share?.name ?? 'Shared library'}: ${status.error}` : 'No shared library open';
+    refresh.disabled = !discover.checked;
+    list.replaceChildren(...(shares.length ? shares.map((share) => {
+      const open = h('button', { textContent: status.share?.id === share.id && status.state === 'connected' ? 'Open ✓' : 'Open' });
+      open.onclick = () => void window.audHost.daapConnect(share.id).catch((err) => (statusLine.textContent = message(err)));
+      const buttons: HTMLElement[] = [open];
+      if (share.hasPassword) buttons.push(h('button', { textContent: 'Forget Password', onclick: () => window.audHost.daapForgetPassword(share.id) }));
+      if (share.address) buttons.push(h('button', { textContent: 'Remove', onclick: () => void save(settings.servers.filter((s) => s !== share.address)) }));
+      return h('div', { className: 'row daap-share' },
+        h('span', { className: 'row-label' }, share.name,
+          h('small', { className: 'muted ma-note', textContent: [share.discovered ? 'On this network' : 'Added by address', share.id, share.needsPassword ? 'password' : ''].filter(Boolean).join(' · ') })),
+        h('span', { className: 'row-control' }, ...buttons));
+    }) : [h('p', { className: 'muted', textContent: discover.checked ? 'No shared libraries found yet.' : 'No shared libraries added.' })]));
+  };
+  const save = async (servers: string[]) => {
+    settings = await window.audHost.daapConfigure({ servers });
+  };
+
+  discover.onchange = async () => {
+    settings = await window.audHost.daapConfigure({ discover: discover.checked });
+    render();
+  };
+  refresh.onclick = async () => {
+    refresh.disabled = true;
+    refresh.textContent = 'Searching…';
+    shares = await window.audHost.daapDiscover().finally(() => (refresh.textContent = 'Search Again'));
+    render();
+  };
+  add.onclick = async () => {
+    const value = address.value.trim();
+    if (!value) return;
+    try {
+      await save([...settings.servers, value]);
+      address.value = '';
+      await window.audHost.daapConnect(value);
+    } catch (err) {
+      statusLine.textContent = message(err);
+    }
+  };
+  address.onkeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') add.click();
+  };
+
+  daapUnsubscribe.forEach((u) => u());
+  daapUnsubscribe = [
+    window.audHost.onDaapShares((s) => { shares = s; render(); }),
+    window.audHost.onDaapStatus((s) => { status = s; render(); }),
+  ];
+  render();
+
+  return h('div', { className: 'prefs' },
+    h('div', { className: 'pref-label section', innerHTML: '<b>Shared libraries</b>' }),
+    h('p', { className: 'muted', textContent: 'Browse and play music libraries shared with DAAP (iTunes sharing) by OwnTone, Firefly, Rhythmbox, Ampache and similar servers. Songs play through the Audacious engine. Libraries shared by iTunes 7 or later and the Music app are not supported: they only accept Apple’s own apps.' }),
+    h('label', { className: 'check' }, discover, h('span', { textContent: 'Find shared libraries on this network (Bonjour)' })),
+    list,
+    h('div', { className: 'table' }, h('div', { className: 'row' }, h('span', { className: 'row-label', textContent: 'Add by address:' }), h('span', { className: 'row-control' }, address, add))),
+    h('div', { className: 'row' }, refresh, openLibrary),
+    statusLine);
+}
 
 // OpenSubsonic servers (Navidrome, Gonic, ...).
 async function subsonicPage(): Promise<HTMLElement> {
@@ -239,7 +318,16 @@ async function musicAssistantPage(): Promise<HTMLElement> {
   };
   const enabled = h('input', { type: 'checkbox', checked: settings.sendspin });
   const playerName = h('input', { type: 'text', value: settings.playerName });
-  const endpoint = h('input', { type: 'text', value: settings.sendspinUrl, spellcheck: false });
+  const endpoint = h('input', { type: 'text', value: settings.sendspinUrl, spellcheck: false, placeholder: 'ws://<server>:8927/sendspin' });
+  const viaServer = h('input', { type: 'radio', name: 'sendspin-route', value: 'server', checked: settings.sendspinRoute !== 'direct' });
+  const direct = h('input', { type: 'radio', name: 'sendspin-route', value: 'direct', checked: settings.sendspinRoute === 'direct' });
+  const route = () => (direct.checked ? 'direct' : 'server') as 'direct' | 'server';
+  const syncRoute = () => (endpoint.disabled = !direct.checked);
+  viaServer.onchange = direct.onchange = () => {
+    syncRoute();
+    void window.audHost.maConfigure({ sendspinRoute: route() });
+  };
+  syncRoute();
   const saveSpeaker = h('button', { textContent: 'Apply' });
   const throughAudacious = h('input', { type: 'checkbox', checked: settings.throughAudacious });
   throughAudacious.onchange = () => void window.audHost.maConfigure({ throughAudacious: throughAudacious.checked });
@@ -247,7 +335,15 @@ async function musicAssistantPage(): Promise<HTMLElement> {
     h('label', { className: 'check' }, throughAudacious,
       h('span', {}, 'Play through the Audacious engine (effects, equalizer and visualizations)',
         h('small', { className: 'muted ma-note', textContent: 'Audio goes through the Audacious engine, timed to stay in sync with other Music Assistant speakers. Otherwise it plays directly, bypassing the engine.' }))),
-    h('div', { className: 'table' }, row('Player name:', playerName), row('Sendspin address:', endpoint)),
+    h('div', { className: 'table' }, row('Player name:', playerName)),
+    h('div', { className: 'pref-label', textContent: 'Connect the player:' }),
+    h('label', { className: 'check' }, viaServer,
+      h('span', {}, 'Through the Music Assistant server address',
+        h('small', { className: 'muted ma-note', textContent: 'Uses the same http or https address as above, and your sign-in, so it works anywhere the server does, including over the internet behind a reverse proxy. Needs Music Assistant 2.7 or later.' }))),
+    h('label', { className: 'check' }, direct,
+      h('span', {}, 'Directly to the Sendspin port',
+        h('small', { className: 'muted ma-note', textContent: 'For your local network. Leave the address empty to use port 8927 on the server.' }))),
+    h('div', { className: 'table' }, row('Sendspin address:', endpoint)),
     h('div', { className: 'row' }, saveSpeaker));
   speakerBox.disabled = !enabled.checked;
   const pairing = h('div', { className: 'ma-pairing', hidden: true });
@@ -268,13 +364,15 @@ async function musicAssistantPage(): Promise<HTMLElement> {
     speakerBox.disabled = !enabled.checked;
     void window.audHost.maConfigure({ sendspin: enabled.checked });
   };
-  saveSpeaker.onclick = () => window.audHost.maConfigure({ playerName: playerName.value, sendspinUrl: endpoint.value });
+  saveSpeaker.onclick = () => window.audHost.maConfigure({ playerName: playerName.value, sendspinUrl: endpoint.value, sendspinRoute: route() });
 
   maUnsubscribe.forEach((u) => u());
   maUnsubscribe = [
     window.audHost.onMaSettings((s) => {
       Object.assign(settings, s);
       throughAudacious.checked = s.throughAudacious;
+      (s.sendspinRoute === 'direct' ? direct : viaServer).checked = true;
+      syncRoute();
     }),
     window.audHost.onMaStatus(renderStatus),
     window.audHost.onSendspinState(renderSpeaker),
@@ -383,6 +481,7 @@ async function show(hash: string): Promise<void> {
     if (w.custom === 'plugins') customs.set(w, await pluginsPage(tab));
     if (w.custom === 'music-assistant') customs.set(w, await musicAssistantPage());
     if (w.custom === 'subsonic') customs.set(w, await subsonicPage());
+    if (w.custom === 'daap') customs.set(w, await daapPage());
   }
   if (token !== showing) return; // a newer navigation won
 

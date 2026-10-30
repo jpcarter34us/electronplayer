@@ -22,7 +22,8 @@ export type StreamEvent = { event: 'start' | 'clear' | 'end'; rate?: number; cha
 
 export class SendspinHost {
   private win?: BrowserWindow;
-  private config = { url: '', name: '', throughAudacious: false };
+  /** `token`: connect through Music Assistant's /sendspin proxy, which takes it as the first message. */
+  private config: { url: string; name: string; throughAudacious: boolean; token?: string } = { url: '', name: '', throughAudacious: false };
   private _state: SendspinState = { ...OFF };
 
   constructor(
@@ -52,9 +53,9 @@ export class SendspinHost {
   }
 
   /** Starts, restarts (after a config change) or stops the player. */
-  apply(enabled: boolean, url: string, name: string, throughAudacious = false): void {
-    const changed = url !== this.config.url || name !== this.config.name || throughAudacious !== this.config.throughAudacious;
-    this.config = { url, name, throughAudacious };
+  apply(enabled: boolean, url: string, name: string, throughAudacious = false, token?: string): void {
+    const changed = url !== this.config.url || name !== this.config.name || throughAudacious !== this.config.throughAudacious || token !== this.config.token;
+    this.config = { url, name, throughAudacious, token };
     if (!enabled || !url) return this.stop();
     if (this.win && !changed) return;
 

@@ -1,4 +1,5 @@
 import type { Equalizer, EqPreset, PluginInfo } from '../shared/backend.js';
+import type { DaapPlaylist, DaapSettings, DaapShare, DaapSong, DaapStatus } from '../shared/daap.js';
 import type { SubsonicSettings, SubsonicSong, SubsonicStatus } from '../shared/subsonic.js';
 import type { MaLoginProvider, MaSettings, MaStatus, PlaybackSource, SendspinState } from '../shared/ma.js';
 import type { CfgType, PluginPrefsSession, PrefValue, VisId, VisSettings } from '../shared/prefs.js';
@@ -40,6 +41,18 @@ declare global {
       subsonicPlay(songs: SubsonicSong[], option: 'play' | 'next' | 'add'): Promise<void>;
       onSubsonicStatus(listener: (status: SubsonicStatus) => void): () => void;
       onSubsonicSettings(listener: (settings: SubsonicSettings) => void): () => void;
+      daapState(): Promise<{ settings: DaapSettings; status: DaapStatus; shares: DaapShare[] }>;
+      daapDiscover(): Promise<DaapShare[]>;
+      daapConfigure(update: Partial<DaapSettings>): Promise<DaapSettings>;
+      daapConnect(id: string, password?: string): Promise<DaapStatus>;
+      daapDisconnect(): Promise<void>;
+      daapForgetPassword(id: string): Promise<void>;
+      daapSongs(): Promise<DaapSong[]>;
+      daapPlaylists(): Promise<DaapPlaylist[]>;
+      daapPlaylistSongs(id: number): Promise<DaapSong[]>;
+      daapPlay(songs: DaapSong[], option: 'play' | 'next' | 'add'): Promise<void>;
+      onDaapStatus(listener: (status: DaapStatus) => void): () => void;
+      onDaapShares(listener: (shares: DaapShare[]) => void): () => void;
     };
   }
 }

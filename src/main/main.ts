@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installContextMenu } from './context-menu';
+import { setUpDaap } from './daap-playback';
 import { createAppMenu } from './menu';
 import { APP_NAME, migrateUserData, useAppIdentity } from './migrate';
 import { loadNativeCore, type NativeMethod } from './native';
@@ -38,6 +39,8 @@ const native = loadNativeCore(app.getPath('userData'), (event) => {
 const sources = new PlaybackSources(native.call);
 // OpenSubsonic servers (Navidrome, ...), played through libaudcore.
 const subsonicPlayback = setUpSubsonic(native.call);
+// DAAP (iTunes sharing) libraries, played through libaudcore.
+const daap = setUpDaap(native.call);
 
 const vis = native.call
   ? new VisState(native.call, (config) => {
@@ -164,6 +167,7 @@ ipcMain.handle('aud:set-vis-option', (_event, option: 'separate' | 'onTop', on: 
 app.whenReady().then(() => {
   sources.start(); // needs safeStorage, which needs the app ready
   void subsonicPlayback.subsonic.start();
+  void daap.start();
   setUpTouchBar();
   if (native.call) {
     appMenu = createAppMenu(sources.call, vis!);
@@ -180,6 +184,7 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   sources.stop();
   subsonicPlayback.subsonic.stop();
+  daap.stop();
   native.shutdown?.();
 });
 

@@ -63,6 +63,22 @@ const api = {
   onSubsonicStatus: (listener: (status: unknown) => void): (() => void) => on('aud:subsonic-status', listener),
   onSubsonicSettings: (listener: (settings: unknown) => void): (() => void) => on('aud:subsonic-settings', listener),
 
+  // DAAP / iTunes sharing (see src/main/daap.ts)
+  /** { settings, status, shares } */
+  daapState: (): Promise<unknown> => ipcRenderer.invoke('aud:daap-state'),
+  daapDiscover: (): Promise<unknown> => ipcRenderer.invoke('aud:daap-discover'),
+  daapConfigure: (update: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('aud:daap-configure', update),
+  /** Opens a share; a password, when given, is stored for it ('' forgets it). */
+  daapConnect: (id: string, password?: string): Promise<unknown> => ipcRenderer.invoke('aud:daap-connect', id, password),
+  daapDisconnect: (): Promise<void> => ipcRenderer.invoke('aud:daap-disconnect'),
+  daapForgetPassword: (id: string): Promise<void> => ipcRenderer.invoke('aud:daap-forget-password', id),
+  daapSongs: (): Promise<unknown> => ipcRenderer.invoke('aud:daap-songs'),
+  daapPlaylists: (): Promise<unknown> => ipcRenderer.invoke('aud:daap-playlists'),
+  daapPlaylistSongs: (id: number): Promise<unknown> => ipcRenderer.invoke('aud:daap-playlist-songs', id),
+  daapPlay: (songs: unknown[], option: string): Promise<void> => ipcRenderer.invoke('aud:daap-play', songs, option),
+  onDaapStatus: (listener: (status: unknown) => void): (() => void) => on('aud:daap-status', listener),
+  onDaapShares: (listener: (shares: unknown) => void): (() => void) => on('aud:daap-shares', listener),
+
   // Hidden Sendspin host window only (src/renderer/sendspin-host.ts)
   sendspinConfig: (): Promise<unknown> => ipcRenderer.invoke('aud:sendspin-config'),
   sendspinState: (state: unknown): void => ipcRenderer.send('aud:sendspin-state', state),
