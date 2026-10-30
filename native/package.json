@@ -1,0 +1,6 @@
+{
+  "name": "audcore-native",
+  "private": true,
+  "dependencies": { "node-addon-api": "8.9.2" },
+  "devDependencies": { "node-gyp": "^11.0.0" }
+}

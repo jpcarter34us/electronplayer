@@ -1,0 +1,6 @@
+[submodule "vendor/audacious"]
+	path = vendor/audacious
+	url = https://github.com/audacious-media-player/audacious.git
+[submodule "vendor/audacious-plugins"]
+	path = vendor/audacious-plugins
+	url = https://github.com/audacious-media-player/audacious-plugins.git

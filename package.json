@@ -1,0 +1,20 @@
+{
+  "name": "audacious-electron",
+  "version": "0.0.1",
+  "description": "Electron port of the Audacious media player and its plugins",
+  "main": "dist/main/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-static.mjs",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "build:audacious": "bash scripts/build-audacious.sh",
+    "build:native": "cd native && node-gyp rebuild --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "45.1.0",
+    "typescript": "7.0.2"
+  }
+}

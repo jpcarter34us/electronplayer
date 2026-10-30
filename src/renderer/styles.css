@@ -1,0 +1,51 @@
+:root {
+  --bg: #1e1f22;
+  --panel: #2b2d31;
+  --text: #e6e6e6;
+  --muted: #9a9ca3;
+  --accent: #5b8def;
+  --row-alt: #25262a;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root { --bg: #fafafa; --panel: #ececee; --text: #1d1d1f; --muted: #6b6b70; --row-alt: #f2f2f4; color-scheme: light; }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  user-select: none;
+}
+
+.toolbar, .statusbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--panel); }
+.toolbar button, .statusbar button {
+  background: none; border: 0; color: var(--text); font-size: 16px; padding: 4px 8px; border-radius: 4px; cursor: pointer;
+}
+.toolbar button:hover, .statusbar button:hover { background: rgb(127 127 127 / .2); }
+#seek { flex: 1; }
+#volume { width: 90px; }
+#time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: center; }
+
+.infobar { padding: 10px 14px; border-bottom: 1px solid rgb(127 127 127 / .2); }
+.infobar h1 { margin: 0; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+main { overflow-y: auto; }
+#playlist { list-style: none; margin: 0; padding: 0; }
+#playlist li { display: flex; gap: 8px; padding: 3px 14px; cursor: default; }
+#playlist li:nth-child(even) { background: var(--row-alt); }
+#playlist li.current { color: var(--accent); font-weight: 600; }
+#playlist .n { color: var(--muted); min-width: 32px; text-align: right; }
+#playlist .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#playlist .len { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.statusbar { font-size: 12px; color: var(--muted); }
+.statusbar #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar button { font-size: 12px; color: var(--muted); }
