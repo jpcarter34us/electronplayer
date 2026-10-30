@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { installContextMenu } from './context-menu';
 import { createAppMenu } from './menu';
+import { APP_NAME, migrateUserData, useAppIdentity } from './migrate';
 import { loadNativeCore, type NativeMethod } from './native';
 import { PlaybackSources, sendspinAsLocal } from './playback-source';
 import { setUpSubsonic } from './subsonic-playback';
@@ -15,6 +16,10 @@ import type { VisId, VisSettings } from '../shared/prefs';
 let playbackTouchBar: ReturnType<typeof createPlaybackTouchBar> | undefined;
 let mainWindow: BrowserWindow | undefined;
 
+// Before anything reads userData: carry settings over from the old app name.
+useAppIdentity();
+migrateUserData();
+app.setAboutPanelOptions({ applicationName: APP_NAME, credits: 'Built on the Audacious engine and its plugins.' });
 installContextMenu();
 
 // libaudcore keeps its config and playlists under $XDG_CONFIG_HOME/audacious;
@@ -82,7 +87,7 @@ function createWindow(): void {
     height: 600,
     minWidth: 480,
     minHeight: 320,
-    title: 'Audacious',
+    title: 'ElectronPlayer',
     backgroundColor: '#1e1f22',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),

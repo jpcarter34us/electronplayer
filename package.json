@@ -1,7 +1,8 @@
 {
-  "name": "audacious-electron",
+  "name": "electronplayer",
+  "productName": "ElectronPlayer",
   "version": "0.0.1",
-  "description": "Electron port of the Audacious media player and its plugins",
+  "description": "ElectronPlayer: a music player built on the Audacious engine and its plugins",
   "main": "dist/main/main.js",
   "private": true,
   "license": "UNLICENSED",

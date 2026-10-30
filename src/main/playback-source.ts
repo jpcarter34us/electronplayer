@@ -4,6 +4,7 @@ import type { MaSettings, PlaybackSource, SendspinState } from '../shared/ma';
 import { broadcast, MusicAssistant } from './music-assistant';
 import type { NativeMethod } from './native';
 import { SendspinHost } from './sendspin';
+import { LiveRouter } from './sendspin-live';
 
 type Call = (method: NativeMethod, args: unknown[]) => Promise<unknown>;
 
@@ -22,10 +23,25 @@ export class PlaybackSources {
   private _source: PlaybackSource = 'local';
   private localPlaying = false;
   private maPlaying = false;
+  /** Plays Music Assistant audio in libaudcore when "Play through the Audacious engine" is on. */
+  readonly live?: LiveRouter;
   private listeners: ((source: PlaybackSource, sendspin: SendspinState) => void)[] = [];
 
   constructor(private native?: Call) {
-    this.sendspin = new SendspinHost((state) => this.onSendspinState(state));
+    this.live = native ? new LiveRouter(native) : undefined;
+    this.sendspin = new SendspinHost(
+      (state) => this.onSendspinState(state),
+      // Only while Music Assistant is the source: after local playback takes
+      // over, audio still in flight must not restart the live stream.
+      (chunk) => {
+        if (this._source === 'ma') this.live?.push(chunk, [this.sendspin.state.artist, this.sendspin.state.title].filter(Boolean).join(' - ') || 'Music Assistant');
+      },
+      (e) => {
+        if (e.event === 'start' && e.rate && e.channels) this.live?.streamStart(e.rate, e.channels);
+        else if (e.event === 'clear') this.live?.streamClear();
+        else if (e.event === 'end') void this.live?.end();
+      },
+    );
     this.ma = new MusicAssistant(
       (status) => broadcast('aud:ma-status', status),
       (event) => broadcast('aud:ma-event', event),
@@ -38,12 +54,15 @@ export class PlaybackSources {
   }
 
   start(): void {
-    this.ma.start();
-    this.applySendspin(this.ma.getSettings());
+    void this.live?.start().then(() => {
+      this.ma.start();
+      this.applySendspin(this.ma.getSettings());
+    });
   }
 
   stop(): void {
     this.sendspin.stop();
+    this.live?.stop();
     this.ma.stop();
   }
 
@@ -59,8 +78,10 @@ export class PlaybackSources {
   /** Feed every libaudcore event: local playback starting takes over. */
   onNativeEvent(event: BackendEvent): void {
     if (event.type !== 'state') return;
-    const playing = event.state.playing && !event.state.paused;
+    // libaudcore playing Music Assistant's live stream is not local playback.
+    const playing = event.state.playing && !event.state.paused && !event.state.live;
     if (playing && !this.localPlaying && this._source === 'ma') {
+      void this.live?.end(); // local playback replaced the live stream in libaudcore
       if (this.sendspin.state.playing) this.sendCommand(this.sendspin.supports('pause') ? 'pause' : 'stop');
       this.setSource('local');
     }
@@ -103,6 +124,7 @@ export class PlaybackSources {
     // while it plays: otherwise a stream still winding down after local
     // playback took over would grab the transport back.
     const started = state.playing && !this.maPlaying;
+    if (!state.playing && this.maPlaying) void this.live?.end(); // paused or stopped
     this.maPlaying = state.playing;
     if (started && this._source !== 'ma') {
       // Music Assistant started streaming here: pause local playback.
@@ -123,7 +145,9 @@ export class PlaybackSources {
   }
 
   private applySendspin(settings: MaSettings): void {
-    this.sendspin.apply(settings.sendspin, this.ma.sendspinUrl(), settings.playerName);
+    const throughAudacious = settings.throughAudacious && !!this.live;
+    if (!throughAudacious) void this.live?.end();
+    this.sendspin.apply(settings.sendspin, this.ma.sendspinUrl(), settings.playerName, throughAudacious);
   }
 
   private registerIpc(): void {
@@ -140,6 +164,7 @@ export class PlaybackSources {
       if (typeof update.sendspin === 'boolean') clean.sendspin = update.sendspin;
       if (typeof update.playerName === 'string') clean.playerName = update.playerName.trim() || this.ma.getSettings().playerName;
       if (typeof update.sendspinUrl === 'string') clean.sendspinUrl = update.sendspinUrl.trim();
+      if (typeof update.throughAudacious === 'boolean') clean.throughAudacious = update.throughAudacious;
       return this.ma.configure(clean);
     });
     ipcMain.handle('aud:ma-forget-token', () => this.ma.forgetToken());

@@ -135,7 +135,7 @@ async function subsonicPage(): Promise<HTMLElement> {
 
   return h('div', { className: 'prefs' },
     h('div', { className: 'pref-label section', innerHTML: '<b>Server</b>' }),
-    h('p', { className: 'muted', textContent: 'Browse and play an OpenSubsonic or Subsonic server, such as Navidrome. Songs play in Audacious, so effects, the equalizer and visualizations apply.' }),
+    h('p', { className: 'muted', textContent: 'Browse and play an OpenSubsonic or Subsonic server, such as Navidrome. Songs play through the Audacious engine, so effects, the equalizer and visualizations apply.' }),
     h('div', { className: 'table' }, row('Server address:', server), row('Username:', username), row('Password:', password)),
     keyBox,
     h('div', { className: 'row' }, connect, signOut, openLibrary),
@@ -241,7 +241,12 @@ async function musicAssistantPage(): Promise<HTMLElement> {
   const playerName = h('input', { type: 'text', value: settings.playerName });
   const endpoint = h('input', { type: 'text', value: settings.sendspinUrl, spellcheck: false });
   const saveSpeaker = h('button', { textContent: 'Apply' });
+  const throughAudacious = h('input', { type: 'checkbox', checked: settings.throughAudacious });
+  throughAudacious.onchange = () => void window.audHost.maConfigure({ throughAudacious: throughAudacious.checked });
   const speakerBox = h('fieldset', { className: 'children' },
+    h('label', { className: 'check' }, throughAudacious,
+      h('span', {}, 'Play through the Audacious engine (effects, equalizer and visualizations)',
+        h('small', { className: 'muted ma-note', textContent: 'Audio goes through the Audacious engine, timed to stay in sync with other Music Assistant speakers. Otherwise it plays directly, bypassing the engine.' }))),
     h('div', { className: 'table' }, row('Player name:', playerName), row('Sendspin address:', endpoint)),
     h('div', { className: 'row' }, saveSpeaker));
   speakerBox.disabled = !enabled.checked;
@@ -267,7 +272,10 @@ async function musicAssistantPage(): Promise<HTMLElement> {
 
   maUnsubscribe.forEach((u) => u());
   maUnsubscribe = [
-    window.audHost.onMaSettings((s) => Object.assign(settings, s)),
+    window.audHost.onMaSettings((s) => {
+      Object.assign(settings, s);
+      throughAudacious.checked = s.throughAudacious;
+    }),
     window.audHost.onMaStatus(renderStatus),
     window.audHost.onSendspinState(renderSpeaker),
   ];
@@ -359,7 +367,7 @@ async function show(hash: string): Promise<void> {
   const token = ++showing;
 
   nav.querySelectorAll('a').forEach((a) => a.setAttribute('aria-current', String(a.dataset.page === page.id)));
-  document.title = `${page.title} – Audacious Settings`;
+  document.title = `${page.title} – ElectronPlayer Settings`;
 
   const values = new Map<string, PrefValue>();
   const widgets = keyed(page.widgets);

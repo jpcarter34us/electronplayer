@@ -22,6 +22,8 @@ export interface PlaybackState {
   length: number;
   /** 0-100, as aud_drct_get_volume_main(). */
   volume: number;
+  /** Native only: Music Assistant audio routed through libaudcore is playing. */
+  live?: boolean;
 }
 
 /** Mirrors libaudcore's PluginType. */

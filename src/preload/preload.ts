@@ -66,6 +66,9 @@ const api = {
   // Hidden Sendspin host window only (src/renderer/sendspin-host.ts)
   sendspinConfig: (): Promise<unknown> => ipcRenderer.invoke('aud:sendspin-config'),
   sendspinState: (state: unknown): void => ipcRenderer.send('aud:sendspin-state', state),
+  sendspinStream: (event: unknown): void => ipcRenderer.send('aud:sendspin-stream', event),
+  /** A decoded PCM chunk for libaudcore ("Play through the Audacious engine"). */
+  sendspinPcm: (chunk: unknown): void => ipcRenderer.send('aud:sendspin-pcm', chunk),
   onSendspinCommand: (listener: (command: unknown) => void): (() => void) => on('aud:sendspin-command', listener),
 };
 

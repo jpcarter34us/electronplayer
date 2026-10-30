@@ -5,7 +5,7 @@ import { h } from './host.js';
 // The Library window: browse Music Assistant or an OpenSubsonic server
 // (Navidrome, ...). Music Assistant plays on any of its players (this
 // computer's Sendspin player by default); Subsonic songs go into the local
-// Audacious playlist. The location hash picks the source: #ma or #subsonic.
+// ElectronPlayer playlist. The location hash picks the source: #ma or #subsonic.
 
 type SourceId = 'ma' | 'subsonic';
 type Option = 'play' | 'next' | 'add';
@@ -240,7 +240,7 @@ const subsonicSource: Source = {
       return [['Artists', (r.artist ?? []).map(ssArtist), 'grid'], ['Albums', (r.album ?? []).map(ssAlbum), 'grid'], ['Songs', (r.song ?? []).map(ssSong), 'list']];
     },
   }),
-  target: () => h('span', { className: 'ma-player', textContent: 'Plays in Audacious' }),
+  target: () => h('span', { className: 'ma-player', textContent: 'Plays in ElectronPlayer' }),
 };
 
 // ===================== Window =====================

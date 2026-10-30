@@ -46,7 +46,7 @@ export function createPlaybackTouchBar(call: Call): { touchBar: TouchBar; update
   });
   const next = new TouchBarButton({ icon: icon('NSTouchBarSkipAheadTemplate'), accessibilityLabel: 'Next', click: () => send('next') });
 
-  const title = new TouchBarLabel({ label: 'Audacious' });
+  const title = new TouchBarLabel({ label: 'ElectronPlayer' });
 
   // Slider units are seconds.
   const seek = new TouchBarSlider({
@@ -91,7 +91,7 @@ export function createPlaybackTouchBar(call: Call): { touchBar: TouchBar; update
 
     const track = tracks[state.position];
     // Track titles follow the "Title format" setting, which includes the artist.
-    set(title, 'label', truncate(track?.title ?? 'Audacious'));
+    set(title, 'label', truncate(track?.title ?? 'ElectronPlayer'));
 
     if (Date.now() >= scrubUntil) {
       set(seek, 'maxValue', Math.max(1, Math.round(state.length / 1000)));

@@ -37,7 +37,7 @@ const hostName = () => os.hostname().replace(/\.local$/, '');
 
 function loadSettings(): Omit<MaSettings, 'hasToken'> {
   const defaults: Omit<MaSettings, 'hasToken'> = {
-    server: '', sendspin: true, playerName: `Audacious (${hostName()})`, sendspinUrl: '', tokenKind: '',
+    server: '', sendspin: true, playerName: `ElectronPlayer (${hostName()})`, sendspinUrl: '', tokenKind: '', throughAudacious: false,
   };
   try {
     return { ...defaults, ...JSON.parse(readFileSync(settingsFile(), 'utf8')) };
@@ -64,7 +64,7 @@ export class MusicAssistant {
     private onEvent: (event: MaEvent) => void,
     private onSettings: (settings: MaSettings) => void,
   ) {
-    this.client = new MaClient(() => this.onStatus(this.status()), (e) => this.onEvent(e), `Audacious on ${hostName()}`);
+    this.client = new MaClient(() => this.onStatus(this.status()), (e) => this.onEvent(e), `ElectronPlayer on ${hostName()}`);
   }
 
   /** Loads the stored token and connects if configured. */
@@ -146,7 +146,7 @@ export class MusicAssistant {
   async loginWithPassword(server: string, username: string, password: string): Promise<MaStatus> {
     this.setServer(server);
     const result = await maAnonymousCommand<{ success?: boolean; access_token?: string; token?: string; error?: string }>(
-      this.settings.server, 'auth/login', { username, password, device_name: `Audacious on ${hostName()}` });
+      this.settings.server, 'auth/login', { username, password, device_name: `ElectronPlayer on ${hostName()}` });
     const token = result?.access_token ?? result?.token;
     if (!result?.success || !token) throw new Error(result?.error || 'Wrong username or password');
     return this.signedIn(token);
@@ -174,7 +174,7 @@ export class MusicAssistant {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(
             '<!doctype html><meta charset="utf-8"><title>Signed in</title>' +
             '<body style="font:15px system-ui;padding:40px;text-align:center">' +
-            '<h2>Signed in to Music Assistant</h2><p>You can close this tab and return to Audacious.</p></body>');
+            '<h2>Signed in to Music Assistant</h2><p>You can close this tab and return to ElectronPlayer.</p></body>');
           clearTimeout(timer);
           resolve(code);
         });

@@ -1,6 +1,8 @@
-# Audacious for Electron
+# ElectronPlayer
 
-A port of the [Audacious](https://audacious-media-player.org) media player and its plugins to Electron.
+A music player for macOS (and, in time, Windows and Linux) built on the engine and plugins of the [Audacious](https://audacious-media-player.org) media player, ported to Electron. It also browses and plays Music Assistant and OpenSubsonic (Navidrome) libraries.
+
+ElectronPlayer is an independent project, not affiliated with the Audacious developers.
 
 The approach, the per-plugin porting matrix and the roadmap are in [docs/PORTING_PLAN.md](docs/PORTING_PLAN.md). In short, the real `libaudcore` engine and every non-GUI plugin run natively through an N-API addon. The GTK, Qt and Winamp-skin interfaces, visualizers and GUI-bound plugins are rewritten in HTML and TypeScript.
 
@@ -33,7 +35,7 @@ npm run build:native
 npm start
 ```
 
-The status bar shows `libaudcore (plugin API …)` when the native engine is active. Without it the app falls back to the HTML5 stub, which plays MP3, FLAC, Ogg, Opus, WAV and AAC only.
+The status bar shows `libaudcore (plugin API …)` when the native engine is active. (When run from source, macOS shows "Electron" in the Dock; a packaged build shows "ElectronPlayer".) Without it the app falls back to the HTML5 stub, which plays MP3, FLAC, Ogg, Opus, WAV and AAC only.
 
 ## Touch Bar
 
@@ -66,7 +68,7 @@ While Music Assistant plays here, the main window, the menus and the Touch Bar s
 
 Notes:
 - Uses `@sendspin/sendspin-js` 5.0.0, the version Music Assistant's own web player uses. Music Assistant accepts it with its default **Allow legacy clients** setting; if you turn that off, this player (like the web player) can't connect.
-- Music Assistant audio plays through Web Audio, not the Audacious engine, so Audacious effects, the equalizer and the visualizers don't apply to it. Music Assistant sends 16-bit audio to Sendspin players.
+- By default Music Assistant audio plays directly through Web Audio, bypassing Audacious. Turn on **Play through the Audacious engine** (Settings › Music Assistant, under "This computer as a speaker") to send it through the Audacious engine instead, so effects, the equalizer and visualizations apply. The app measures the engine's delay (about 70 ms) and feeds the audio that much early, keeping it in sync with your other Music Assistant speakers. It plays from a hidden playlist, so your own playlist is untouched. Music Assistant sends 16-bit audio to Sendspin players.
 
 ## OpenSubsonic (Navidrome and others)
 
@@ -75,3 +77,7 @@ Notes:
 In the Library window, switch the source to **Subsonic** for Artists, Albums, Recently Added, Playlists, Starred, Random Songs and search. Songs go into the Audacious playlist and play through the Audacious engine, so effects, the equalizer and visualizations apply. Plays are reported back to the server ("now playing", then a full play at half the song or 4 minutes).
 
 Subsonic puts credentials in every stream URL, and Audacious saves playlist URLs to disk, so saved playlists hold local addresses (`http://127.0.0.1:<port>/subsonic/<key>/…`) and a small proxy in the app adds your credentials to each request. Saved Subsonic songs therefore play only while the app is running.
+
+## Renamed from "Audacious for Electron"
+
+Settings now live in `~/Library/Application Support/ElectronPlayer`. On first launch ElectronPlayer copies over the old `audacious-electron` folder (playlists, equalizer presets, Music Assistant and Subsonic settings) and leaves the original in place. Saved sign-ins can't be carried over, because they are encrypted with a Keychain key named after the app, so sign in to Music Assistant and Subsonic once more.

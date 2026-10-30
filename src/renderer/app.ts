@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     if (maActive) return renderMa(ma!);
     $<HTMLImageElement>('cover').hidden = true;
     const t = tracks[state.position];
-    $('title').textContent = t ? t.title : 'Audacious';
+    $('title').textContent = t ? t.title : 'ElectronPlayer';
     $('time').textContent = `${fmt(state.time)} / ${fmt(state.length)}`;
     $('play').textContent = state.playing && !state.paused ? '⏸' : '▶';
     seek.max = String(Math.max(state.length, 0));

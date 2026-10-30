@@ -54,7 +54,18 @@ struct StateData
 {
     bool playing, paused;
     int position, time, length, volume;
+    bool live; // the Music Assistant live stream is what's playing
 };
+
+// Music Assistant audio routed through libaudcore plays from its own
+// playlist, so the user's playlist is never touched.
+static const char LIVE_TITLE[] = "Music Assistant (live)";
+static Playlist live_playlist;
+
+static bool live_playing ()
+{
+    return live_playlist.exists () && aud_drct_get_playing () && Playlist::playing_playlist () == live_playlist;
+}
 
 struct PluginData
 {
@@ -80,7 +91,8 @@ static StateData snapshot_state ()
             Playlist::active_playlist ().get_position (),
             playing ? aud_drct_get_time () : 0,
             playing ? aud_drct_get_length () : -1,
-            aud_drct_get_volume_main ()};
+            aud_drct_get_volume_main (),
+            live_playing ()};
 }
 
 static std::vector<TrackData> snapshot_playlist ()
@@ -154,6 +166,8 @@ static Napi::Value to_js (Napi::Env env, const StateData & s)
     o.Set ("time", s.time);
     o.Set ("length", s.length);
     o.Set ("volume", s.volume);
+    if (s.live)
+        o.Set ("live", true);
     return o;
 }
 
@@ -252,6 +266,38 @@ static void emit (const char * type, const char * key, T data)
 }
 
 static void emit_state () { emit ("state", "state", snapshot_state ()); }
+
+// Starts playback once items queued with insert_items(..., play = false)
+// have been added. (insert_items' own play flag obeys "Clear the playlist
+// when opening files", which would wipe the user's playlist.)
+static struct
+{
+    Playlist playlist;
+    int position = -1;
+} pending_play;
+
+static void on_add_complete (void *, void *)
+{
+    Playlist pl = pending_play.playlist;
+    int pos = pending_play.position;
+    pending_play = {};
+    if (pl.exists () && pos >= 0 && pos < pl.n_entries ())
+    {
+        pl.set_position (pos);
+        pl.start_playback ();
+    }
+}
+
+static void remove_live_playlists ()
+{
+    for (int i = Playlist::n_playlists () - 1; i >= 0; i--)
+    {
+        Playlist p = Playlist::by_index (i);
+        if (str (p.get_title ()) == LIVE_TITLE && Playlist::n_playlists () > 1)
+            p.remove_playlist ();
+    }
+    live_playlist = Playlist ();
+}
 static void emit_playlist () { emit ("playlist", "tracks", snapshot_playlist ()); }
 
 // ---- engine hooks (engine thread) ----
@@ -303,6 +349,8 @@ static void engine_main (std::string config_home, std::promise<void> * ready)
     hook_associate ("ui show error", on_error, nullptr);
     for (auto name : equalizer_hooks)
         hook_associate (name, on_equalizer, nullptr);
+    hook_associate ("playlist add complete", on_add_complete, nullptr);
+    remove_live_playlists (); // left over from a previous run
 
     // Position updates while playing; libaudcore has no per-tick hook.
     ticker.start (250, [] () {
@@ -324,6 +372,10 @@ static void engine_main (std::string config_home, std::promise<void> * ready)
     hook_dissociate ("ui show error", on_error);
     for (auto name : equalizer_hooks)
         hook_dissociate (name, on_equalizer);
+    hook_dissociate ("playlist add complete", on_add_complete);
+    if (live_playlist.exists () && Playlist::playing_playlist () == live_playlist)
+        aud_drct_stop ();
+    remove_live_playlists (); // don't save it with the user's playlists
     vis_stop ();
 
     aud_cleanup ();
@@ -939,8 +991,47 @@ Napi::Value Insert (const Napi::CallbackInfo & info)
             }
             items.append (String (e.uri.c_str ()), std::move (tuple));
         }
-        pl.insert_items (pos, std::move (items), play);
+        pl.insert_items (pos, std::move (items), false);
+        if (play)
+            pending_play = {pl, pos};
         return [pos] (Napi::Env env) -> Napi::Value { return Napi::Number::New (env, pos); };
+    });
+}
+
+// playLive(uri, title): plays a live stream from the hidden live playlist.
+Napi::Value PlayLive (const Napi::CallbackInfo & info)
+{
+    std::string uri = info.Length () > 0 ? info[0].ToString ().Utf8Value () : "";
+    std::string title = (info.Length () > 1 && info[1].IsString ()) ? info[1].As<Napi::String> ().Utf8Value () : "Music Assistant";
+    return call (info.Env (), [uri, title] () {
+        if (!live_playlist.exists ())
+        {
+            live_playlist = Playlist::insert_playlist (-1);
+            live_playlist.set_title (LIVE_TITLE);
+        }
+        live_playlist.remove_all_entries ();
+        Tuple tuple;
+        tuple.set_filename (uri.c_str ());
+        tuple.set_str (Tuple::Title, title.c_str ());
+        tuple.set_state (Tuple::Valid);
+        Index<PlaylistAddItem> items;
+        items.append (String (uri.c_str ()), std::move (tuple));
+        live_playlist.insert_items (0, std::move (items), false);
+        pending_play = {live_playlist, 0};
+        return undefined_result ();
+    });
+}
+
+// stopLive(): stops the live stream (if it is playing) and drops its playlist.
+Napi::Value StopLive (const Napi::CallbackInfo & info)
+{
+    return call (info.Env (), [] () {
+        if (pending_play.playlist == live_playlist)
+            pending_play = {};
+        if (live_playing ())
+            aud_drct_stop ();
+        remove_live_playlists ();
+        return undefined_result ();
     });
 }
 
@@ -1293,6 +1384,8 @@ Napi::Object InitModule (Napi::Env env, Napi::Object exports)
     exports.Set ("remove", Napi::Function::New (env, Remove));
     exports.Set ("open", Napi::Function::New (env, Open));
     exports.Set ("insert", Napi::Function::New (env, Insert));
+    exports.Set ("playLive", Napi::Function::New (env, PlayLive));
+    exports.Set ("stopLive", Napi::Function::New (env, StopLive));
     exports.Set ("clear", Napi::Function::New (env, Clear));
     exports.Set ("getPlaylist", Napi::Function::New (env, GetPlaylist));
     exports.Set ("getState", Napi::Function::New (env, GetState));

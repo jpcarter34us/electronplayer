@@ -14,6 +14,8 @@ export interface MaSettings {
   sendspinUrl: string;
   /** What the stored token is: a sign-in session (renews itself) or a pasted long-lived token. */
   tokenKind: '' | 'session' | 'long-lived';
+  /** Play Music Assistant audio through libaudcore (effects, equalizer, visualizations). */
+  throughAudacious: boolean;
 }
 
 /** A sign-in provider other than username/password (e.g. Home Assistant). */

@@ -11,18 +11,39 @@ const OFF: SendspinState = {
   progressAt: 0, speed: 0, volume: 100, muted: false, commands: [],
 };
 
+export interface PcmChunk {
+  playAt: number;
+  rate: number;
+  channels: number;
+  pcm: ArrayBuffer;
+}
+
+export type StreamEvent = { event: 'start' | 'clear' | 'end'; rate?: number; channels?: number };
+
 export class SendspinHost {
   private win?: BrowserWindow;
-  private config = { url: '', name: '' };
+  private config = { url: '', name: '', throughAudacious: false };
   private _state: SendspinState = { ...OFF };
 
-  constructor(private onState: (state: SendspinState) => void) {
+  constructor(
+    private onState: (state: SendspinState) => void,
+    /** Decoded audio when playing through Audacious. */
+    private onPcm: (chunk: PcmChunk) => void = () => {},
+    private onStream: (event: StreamEvent) => void = () => {},
+  ) {
     // Only the hidden host window may use these channels.
-    ipcMain.handle('aud:sendspin-config', (event) => (event.sender === this.win?.webContents ? this.config : null));
+    const fromHost = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => event.sender === this.win?.webContents;
+    ipcMain.handle('aud:sendspin-config', (event) => (fromHost(event) ? this.config : null));
     ipcMain.on('aud:sendspin-state', (event, update: Partial<SendspinState>) => {
-      if (event.sender !== this.win?.webContents) return;
+      if (!fromHost(event)) return;
       this._state = { ...this._state, ...update, enabled: true };
       this.onState(this.state);
+    });
+    ipcMain.on('aud:sendspin-pcm', (event, chunk: PcmChunk) => {
+      if (fromHost(event) && chunk?.pcm instanceof ArrayBuffer) this.onPcm(chunk);
+    });
+    ipcMain.on('aud:sendspin-stream', (event, e: StreamEvent) => {
+      if (fromHost(event)) this.onStream(e);
     });
   }
 
@@ -31,9 +52,9 @@ export class SendspinHost {
   }
 
   /** Starts, restarts (after a config change) or stops the player. */
-  apply(enabled: boolean, url: string, name: string): void {
-    const changed = url !== this.config.url || name !== this.config.name;
-    this.config = { url, name };
+  apply(enabled: boolean, url: string, name: string, throughAudacious = false): void {
+    const changed = url !== this.config.url || name !== this.config.name || throughAudacious !== this.config.throughAudacious;
+    this.config = { url, name, throughAudacious };
     if (!enabled || !url) return this.stop();
     if (this.win && !changed) return;
 
@@ -49,8 +70,12 @@ export class SendspinHost {
         autoplayPolicy: 'no-user-gesture-required',
       },
     });
-    this.win.on('closed', () => (this.win = undefined));
-    void this.win.loadFile(rendererFile('sendspin.html'));
+    const win = this.win;
+    // close() finishes later: by then a restart may have replaced this.win.
+    win.on('closed', () => {
+      if (this.win === win) this.win = undefined;
+    });
+    void win.loadFile(rendererFile('sendspin.html'));
   }
 
   command(command: string, args?: Record<string, unknown>): void {

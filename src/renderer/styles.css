@@ -104,6 +104,7 @@ hr.vertical { border-top: 0; border-left: 1px solid rgb(127 127 127 / .3); width
 .ma-status[data-state=connected]::before { color: #3fb950; }
 .ma-status[data-state=connecting]::before { color: #d29922; }
 .ma-pairing { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 6px; }
+.ma-note { display: block; font-size: 12px; margin-top: 2px; }
 .ma-advanced summary { cursor: pointer; color: var(--muted); margin: 4px 0; }
 .ma-advanced[open] { display: flex; flex-direction: column; gap: 8px; }
 .ma-pairing strong { font-size: 20px; letter-spacing: 3px; font-variant-numeric: tabular-nums; }

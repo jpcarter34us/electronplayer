@@ -21,7 +21,7 @@ import type { SubsonicSettings, SubsonicStatus } from '../shared/subsonic';
 // software from guessing the URLs.
 
 const API_VERSION = '1.16.1';
-const CLIENT = 'AudaciousElectron';
+const CLIENT = 'ElectronPlayer';
 
 /** Read-only calls the library window may make. */
 const ALLOWED = new Set([

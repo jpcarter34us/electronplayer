@@ -47,7 +47,7 @@ function show(
  * "plugins/effect".
  */
 export function openSettings(page?: string): BrowserWindow {
-  return show('settings', 'settings.html', { title: 'Audacious Settings', width: 760, height: 560, minWidth: 600, minHeight: 400 }, page);
+  return show('settings', 'settings.html', { title: 'ElectronPlayer Settings', width: 760, height: 560, minWidth: 600, minHeight: 400 }, page);
 }
 
 export function openEqualizer(): BrowserWindow {

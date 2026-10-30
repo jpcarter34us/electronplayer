@@ -1,4 +1,6 @@
-# Porting Audacious to Electron
+# Porting Audacious to Electron (ElectronPlayer)
+
+ElectronPlayer is the app this port produces (renamed from "Audacious for Electron"); the engine and plugins remain Audacious's.
 
 Upstream snapshot surveyed: `audacious` @ 929e89d and `audacious-plugins` @ 419f26c (both 2026-10-19).
 
@@ -150,7 +152,8 @@ Not part of upstream Audacious; added for this port.
 - **One transport, two engines:** `playback-source.ts` makes whichever engine started playing last the active source. Transport calls from the main window, menus and Touch Bar are routed to it, and starting one pauses the other. Switching is edge-triggered on "started playing", so a stream winding down can't grab control back.
 - **Sign-in:** ported from the MA mobile app (Apache-2.0; see `NOTICE`): `auth/login` (username/password) or `auth/providers` + `auth/authorization_url` (e.g. Home Assistant), each yielding a session token (30 days sliding, 90 max) presented with `auth` plus a `device_name`. The mobile app's PKCE return to a custom URL scheme (`redirect_target: "app"`) is allowed only over Remote Access, so the desktop app passes a loopback `return_url`, which the server trusts (`helpers/redirect_validation.py`) and appends the token to as `?code=`. Sign-out sends `auth/logout`.
 - **Tested against:** a mock MA server for the API and the real aiosendspin 10.2.1 server for Sendspin, configured like Music Assistant's defaults (`allow_noncompliant_clients` on, as MA's "Allow legacy clients" sets it). Not yet tested against a real Music Assistant install.
-- **Limits:** MA audio bypasses libaudcore (no Audacious effects, EQ or visualizers). Routing it through libaudcore (e.g. sendspin-cpp as an input plugin) would trade away sync accuracy with other speakers.
+- **Through Audacious (optional):** with the setting on, the Sendspin page runs `SendspinCore` only (no Web Audio). Each decoded chunk is converted to 16-bit PCM with the Sendspin volume applied, stamped with the local time it should be heard (`serverTimeUs` against `getCurrentServerTimeUs()`, plus the server's sync delay), and sent to the main process. `sendspin-live.ts` serves an endless WAV over loopback HTTP, which libaudcore plays like internet radio from a hidden "Music Assistant (live)" playlist (addon `playLive` / `stopLive`). Chunks are written at their time minus libaudcore's pipeline delay, measured once a second from its playback position (about 70 ms). Seek or track change drops queued chunks; stream end or pause stops the live playback; a format change restarts it. The live stream is excluded from source switching and Subsonic scrobbling (`state.live`).
+- **Playlist safety:** `insert_items(..., play = true)` obeys "Clear the playlist when opening files" (on by default), which would wipe the user's playlist. `insert` and `playLive` now add without playing and start playback on the `playlist add complete` hook.
 
 ## 9. OpenSubsonic integration
 

@@ -59,7 +59,7 @@ export function setUpSubsonic(native: Call | undefined): { subsonic: Subsonic; o
     if (event.type === 'playlist') tracks = event.tracks;
     if (event.type !== 'state') return;
     const s = event.state;
-    if (!s.playing) {
+    if (!s.playing || s.live) {
       current = null;
       return;
     }
