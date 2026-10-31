@@ -92,18 +92,18 @@ It needs only Docker. On a Mac: `brew install colima docker`, then `colima start
 
 1. Builds the TypeScript and the renderer bundles (on the host).
 2. `scripts/build-engine-other.sh <target>` (in a container) builds a small audio-only FFmpeg, libaudcore, the plugins and the native addon, laid out as they sit next to the app's executable (`engine/`, plugins in `engine/audacious/`). As on macOS, libaudcore relocates its paths from the executable, so this works wherever the app is installed or the AppImage is mounted.
-   - **Linux** is built on Debian 12 (glibc 2.36), so it runs on distributions from about 2022 on: Ubuntu 22.04+, Debian 12+, Fedora 37+ and so on. x64 is native; arm64 is cross-compiled with Debian's arm64 libraries.
+   - **Linux** is built on Ubuntu 20.04 (glibc 2.31, GCC 9), so it runs on Ubuntu 20.04 and later, Debian 11 and later, Fedora 33 and later, and current rolling distributions. x64 is native; arm64 is cross-compiled with Ubuntu's arm64 libraries. On an older system the app still opens, but as the basic HTML player; its status bar then says why the engine did not load.
    - **Windows** is cross-compiled with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) against MSYS2's prebuilt libraries (`scripts/fetch-msys2-deps.py`, which downloads them with checksums). The addon is compiled directly, since node-gyp cannot target Windows from Linux.
-3. `scripts/bundle-libs-other.py` copies the libraries the plugins use into `engine/`. On Linux, libraries every desktop has and Electron itself loads (glib, ALSA/PulseAudio/PipeWire, GnuTLS, X11) are left to the system; everything resolves through `$ORIGIN` RUNPATHs. On Windows, the addon adds `engine\` to the DLL search path.
+3. `scripts/bundle-libs-other.py` copies the libraries the plugins use into `engine/`. On Linux, libraries every desktop has and Electron itself loads (glib, ALSA/PulseAudio, GnuTLS, X11) are left to the system; everything resolves through `$ORIGIN` RUNPATHs. On Windows, the addon adds `engine\` to the DLL search path.
 4. electron-builder packages it (in the Windows container, which has Wine for the NSIS installer).
 
-Plugins: the same set as macOS. Linux adds ALSA, PulseAudio, PipeWire and JACK output and MPRIS (desktop media keys and widgets); Windows uses waveOut. Two changes to Audacious were needed, kept in `patches/audacious/` and applied automatically:
+Plugins: the same set as macOS, except on Linux no SID (Ubuntu 20.04's libsidplayfp is too old) and no PipeWire output (it needs PipeWire 0.3.33; PipeWire desktops play through the PulseAudio plugin via pipewire-pulse). Linux adds ALSA, PulseAudio and JACK output and MPRIS (desktop media keys and widgets); Windows uses waveOut. Two changes to Audacious were needed, kept in `patches/audacious/` and applied automatically:
 - In headless mode libaudcore runs its main loop on its own GLib context. On Linux, Chromium's UI thread runs on GLib's default context, and sharing it crashed the app at start. The macOS build uses the same code.
 - With clang on Windows, every symbol is exported instead of marking exports per function (clang rejects Audacious's mix of plain declarations and `dllexport` definitions, which GCC accepts).
 
 What the builds are:
 - **Unsigned.** Windows SmartScreen warns about an unknown publisher the first time ("More info", then "Run anyway").
-- **Tested:** the Linux x64 `.deb` was installed on a clean Ubuntu 24.04 container and played WAV, MP3, FLAC and Ogg through PulseAudio, with every plugin found and every engine library loaded from the app. Not run here: the arm64 packages and the Windows builds (see `docs/PORTING_PLAN.md`).
+- **Tested (Linux x64):** the `.deb` installed on clean Ubuntu 20.04 and 24.04 containers played WAV, MP3, FLAC and Ogg through PulseAudio, with all 47 plugins found and every engine library loaded from the app. The engine also loads on Debian 11 and 12, Ubuntu 22.04, Fedora 41 and Arch. **Not run here:** the Linux arm64 packages and the Windows builds. Under Wine, Electron crashes at startup, so the Windows engine has only been checked to build, link and package.
 - `scripts/package-other.sh` turns off the Docker VM's `qemu-i386` handler if it is on: on an x86_64 VM it hijacks 32-bit programs (the NSIS stub under Wine) and makes them crawl. Restarting the VM turns it back on.
 
 ## Touch Bar

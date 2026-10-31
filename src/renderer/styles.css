@@ -32,6 +32,7 @@ body {
   background: none; border: 0; color: var(--text); font-size: 16px; padding: 4px 8px; border-radius: 4px; cursor: pointer;
 }
 .toolbar button:hover, .statusbar button:hover { background: rgb(127 127 127 / .2); }
+.toolbar button svg { display: block; }
 #seek { flex: 1; }
 #volume { width: 90px; }
 #time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: center; }

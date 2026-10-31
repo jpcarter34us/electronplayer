@@ -42,7 +42,7 @@ if [[ $os == linux ]]; then
   if [[ $arch == x64 ]]; then cc=gcc; cxx=g++; else cc=$triple-gcc; cxx=$triple-g++; fi
   ar=$([[ $arch == x64 ]] && echo ar || echo $triple-ar)
   strip=$([[ $arch == x64 ]] && echo strip || echo $triple-strip)
-  pcdirs+=("/usr/lib/$triple/pkgconfig" /usr/share/pkgconfig)
+  pcdirs+=("/usr/lib/$triple/pkgconfig" /usr/lib/pkgconfig /usr/share/pkgconfig)  # opusfile is not multiarch on 20.04
   system=linux
 else
   cc=$triple-clang; cxx=$triple-clang++; ar=llvm-ar; strip=llvm-strip

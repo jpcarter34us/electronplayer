@@ -15,6 +15,8 @@ engine uses the same copy as the rest of the process. RUNPATHs are set so
 everything resolves inside the engine folder. Windows: plugins find their
 DLLs through the folder the addon adds to the DLL search path.
 """
+from __future__ import annotations  # Ubuntu 20.04 has Python 3.8
+
 import os
 import re
 import shutil
@@ -30,9 +32,10 @@ LINUX_SYSTEM = re.compile(
     r'libglib-2\.0|libgobject-2\.0|libgio-2\.0|libgmodule-2\.0|libgthread-2\.0|libffi|libpcre2-8|'
     r'libmount|libblkid|libselinux|libz|libexpat|libuuid|libsystemd|libudev|libdbus-1|'
     r'libasound|libpulse.*|libpipewire-0\.3|libjack.*|'
-    # (libunistring and libidn2 are bundled even so: their sonames differ
-    # between distributions, e.g. Ubuntu 24.04 has libunistring.so.5.)
-    r'libgnutls|libnettle|libhogweed|libgmp|libp11-kit|libtasn1|'
+    # (libunistring, libidn2, nettle and hogweed are bundled even so: their
+    # sonames differ between distributions, e.g. libnettle.so.7 on Ubuntu
+    # 20.04 but .so.8 from 22.04 on.)
+    r'libgnutls|libgmp|libp11-kit|libtasn1|'
     r'libX.*|libxcb.*|libwayland.*|libGL.*|libEGL|libdrm|libgbm)\.so.*$')
 
 if windows:
@@ -42,7 +45,7 @@ if windows:
               f'/opt/llvm-mingw/{triple}/bin']
 else:
     triple = 'aarch64-linux-gnu' if arm else 'x86_64-linux-gnu'
-    search = [os.path.join(deps, 'ffmpeg', 'lib'), f'/usr/lib/{triple}', f'/lib/{triple}']
+    search = [os.path.join(deps, 'ffmpeg', 'lib'), f'/usr/lib/{triple}', f'/lib/{triple}', '/usr/lib']
     # libjack etc. live in subfolders on some Debian versions; pulse keeps a private lib.
     search += [os.path.join(f'/usr/lib/{triple}', d) for d in ('pulseaudio',)]
 

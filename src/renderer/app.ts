@@ -4,6 +4,7 @@ import type { VisId, VisSettings } from '../shared/prefs.js';
 import { Html5Backend } from './backends/html5.js';
 import { NativeBackend } from './backends/native.js';
 import './host.js';
+import { setIcon } from './icons.js';
 import { createVisualizer, type Visualizer } from './visualizers.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
   const native = await window.audHost.nativeInfo();
   const backend: AudBackend = native.available ? new NativeBackend() : new Html5Backend();
   $('backend').textContent = native.available ? `libaudcore (${native.detail})` : backend.name;
+  for (const name of ['open', 'prev', 'play', 'stop', 'next', 'library', 'settings'] as const) setIcon($(name), name);
   $('backend').title = native.detail;
 
   // libaudcore restores the last session's playlist, so start from it.
@@ -53,7 +55,7 @@ async function main(): Promise<void> {
     $('title').textContent = [m.artist, m.title].filter(Boolean).join(' – ') || 'Music Assistant';
     $('source').textContent = `Music Assistant${m.groupName ? ` · ${m.groupName}` : ''}${m.album ? ` · ${m.album}` : ''}`;
     $('time').textContent = `${fmt(time)} / ${fmt(m.durationMs || -1)}`;
-    $('play').textContent = m.playing ? '⏸' : '▶';
+    setIcon($('play'), m.playing ? 'pause' : 'play');
     seek.max = String(m.durationMs || 0);
     $<HTMLInputElement>('volume').value = String(m.volume);
     if (!seeking) seek.value = String(time);
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
     const t = tracks[state.position];
     $('title').textContent = t ? t.title : 'ElectronPlayer';
     $('time').textContent = `${fmt(state.time)} / ${fmt(state.length)}`;
-    $('play').textContent = state.playing && !state.paused ? '⏸' : '▶';
+    setIcon($('play'), state.playing && !state.paused ? 'pause' : 'play');
     seek.max = String(Math.max(state.length, 0));
     $<HTMLInputElement>('volume').value = String(state.volume);
     if (!seeking) seek.value = String(state.time);
@@ -81,7 +83,7 @@ async function main(): Promise<void> {
   const renderPairing = () => {
     $('status').textContent = ma?.pairingCode
       ? `Pair this player in Music Assistant with code ${ma.pairingCode}`
-      : 'Drop files here or click ⏏ · right-click a song to remove it';
+      : 'Drop files here or click Open · right-click a song to remove it';
     $('status').classList.toggle('pairing', !!ma?.pairingCode);
   };
 
@@ -91,11 +93,18 @@ async function main(): Promise<void> {
     ma = st.sendspin;
     $('library').hidden = false;
     $('library').onclick = () => window.audHost.openWindow('library');
+    // Also in the menu bar, which some Linux desktops hide or move away.
+    $('settings').hidden = false;
+    $('settings').onclick = () => window.audHost.openWindow('settings');
     window.audHost.onSource((s) => { source = s; renderState(); });
     window.audHost.onSendspinState((s) => { ma = s; renderPairing(); if (source === 'ma') renderState(); });
     // Advance the time display between Music Assistant updates.
     setInterval(() => source === 'ma' && ma?.playing && !seeking && renderState(), 250);
     renderPairing();
+  } else {
+    // Without the engine there are no plugins, Library or sign-ins; say why.
+    $('status').textContent = `Audacious engine not loaded, basic player only: ${native.detail}`;
+    $('status').title = native.detail;
   }
 
   // Visualizations (native engine only): one canvas per enabled visualizer,

@@ -1,9 +1,8 @@
 # Build environments for the Linux and Windows engines and packages, used by
-# scripts/package-other.sh. Debian 12 (glibc 2.36) so the Linux builds run on
-# any distribution from about 2022 on.
+# scripts/package-other.sh.
 #
 #   linux-x64    native compilers and amd64 libraries
-#   linux-arm64  cross compilers and arm64 libraries (Debian multiarch)
+#   linux-arm64  cross compilers and arm64 libraries (Ubuntu multiarch)
 #   windows      llvm-mingw for x64 and arm64 (libraries come from MSYS2,
 #                fetched by scripts/fetch-msys2-deps.py), Wine for
 #                electron-builder and tests; also packages every Linux and
@@ -19,25 +18,41 @@ RUN arch=$(dpkg --print-architecture | sed 's/amd64/x64/') \
     && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz" \
        | tar -xJ -C /usr/local --strip-components=1
 
-# Libraries the plugins use, for one Debian architecture (":amd64"/":arm64").
-# FFmpeg is not here: Debian's links half the multimedia stack, so a small
-# audio-only FFmpeg is built from source instead (scripts/build-engine-other.sh).
-FROM base AS linux-libs
+# The Linux engine is built on Ubuntu 20.04 (glibc 2.31, GCC 9), the oldest
+# system it then runs on; everything newer (Debian 11+, Fedora 33+, ...) works
+# too. Libraries the plugins use, for one architecture (":amd64"/":arm64";
+# arm64 packages come from ports.ubuntu.com). Ubuntu's meson is too old, so
+# meson comes from PyPI. FFmpeg is not here: distribution builds link half the
+# multimedia stack, so a small audio-only FFmpeg is built from source instead
+# (scripts/build-engine-other.sh). PipeWire 0.3.33+ is newer than 20.04, so
+# there is no PipeWire output plugin; PipeWire desktops play through the
+# PulseAudio one (pipewire-pulse).
+FROM ubuntu:20.04 AS linux-libs
+ARG NODE_VERSION=22.23.3
 ARG DEB_ARCH
-RUN dpkg --add-architecture ${DEB_ARCH} && apt-get update && apt-get install -y --no-install-recommends \
+ENV DEBIAN_FRONTEND=noninteractive
+RUN sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list \
+    && if [ "${DEB_ARCH}" = arm64 ]; then for s in focal focal-updates focal-security; do \
+         echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $s main universe" >> /etc/apt/sources.list; done; fi \
+    && dpkg --add-architecture ${DEB_ARCH} && apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ninja-build pkg-config gettext git python3 python3-pip curl ca-certificates \
+      xz-utils zstd file patchelf binutils nasm \
       libglib2.0-dev:${DEB_ARCH} libflac-dev:${DEB_ARCH} libvorbis-dev:${DEB_ARCH} libogg-dev:${DEB_ARCH} \
       libopus-dev:${DEB_ARCH} libopusfile-dev:${DEB_ARCH} libmpg123-dev:${DEB_ARCH} libsndfile1-dev:${DEB_ARCH} \
       libwavpack-dev:${DEB_ARCH} libopenmpt-dev:${DEB_ARCH} libmodplug-dev:${DEB_ARCH} libsidplayfp-dev:${DEB_ARCH} \
       libfluidsynth-dev:${DEB_ARCH} libfaad-dev:${DEB_ARCH} libcue-dev:${DEB_ARCH} libneon27-gnutls-dev:${DEB_ARCH} \
       libsoxr-dev:${DEB_ARCH} libsamplerate0-dev:${DEB_ARCH} libbs2b-dev:${DEB_ARCH} libmp3lame-dev:${DEB_ARCH} \
       libxml2-dev:${DEB_ARCH} libcurl4-gnutls-dev:${DEB_ARCH} \
-      libasound2-dev:${DEB_ARCH} libpulse-dev:${DEB_ARCH} libpipewire-0.3-dev:${DEB_ARCH} libjack-jackd2-dev:${DEB_ARCH} \
-    && rm -rf /var/lib/apt/lists/*
+      libasound2-dev:${DEB_ARCH} libpulse-dev:${DEB_ARCH} libjack-jackd2-dev:${DEB_ARCH} \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir meson==1.4.1
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+      | tar -xJ -C /usr/local --strip-components=1
 
 FROM linux-libs AS linux-x64
 
 FROM linux-libs AS linux-arm64
-RUN apt-get update && apt-get install -y --no-install-recommends crossbuild-essential-arm64 qemu-user \
+RUN apt-get update && apt-get install -y --no-install-recommends crossbuild-essential-arm64 \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS windows
