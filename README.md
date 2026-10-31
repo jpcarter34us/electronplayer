@@ -103,7 +103,7 @@ Plugins: the same set as macOS, except on Linux no SID (Ubuntu 20.04's libsidpla
 
 What the builds are:
 - **Unsigned.** Windows SmartScreen warns about an unknown publisher the first time ("More info", then "Run anyway").
-- **Tested (Linux x64):** the `.deb` installed on clean Ubuntu 20.04 and 24.04 containers played WAV, MP3, FLAC and Ogg through PulseAudio, with all 47 plugins found and every engine library loaded from the app. The engine also loads on Debian 11 and 12, Ubuntu 22.04, Fedora 41 and Arch. **Not run here:** the Linux arm64 packages and the Windows builds. Under Wine, Electron crashes at startup, so the Windows engine has only been checked to build, link and package.
+- **Tested (Linux x64):** the `.deb` installed on clean Ubuntu 20.04 and 24.04 containers played WAV, MP3, FLAC and Ogg through PulseAudio, with all 47 plugins found and every engine library loaded from the app. The engine also loads on Debian 11 and 12, Ubuntu 22.04, Fedora 41 and Arch. **Tested (Windows x64 engine):** the packaged `audcore.node` and engine, loaded by Windows Node.js under Wine (set to Windows 10), found all 45 plugins and played WAV, MP3, FLAC and Ogg (to the file writer; the container has no sound device). The Electron window itself was not run: stock Electron crashes at startup under Debian's Wine 8, engine or not. **Not run here:** the Linux and Windows arm64 packages.
 - `scripts/package-other.sh` turns off the Docker VM's `qemu-i386` handler if it is on: on an x86_64 VM it hijacks 32-bit programs (the NSIS stub under Wine) and makes them crawl. Restarting the VM turns it back on.
 
 ## Touch Bar
