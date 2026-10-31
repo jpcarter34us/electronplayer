@@ -9,6 +9,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+bash "$root/scripts/apply-patches.sh"
 prefix="$root/vendor/prefix"
 build="$root/vendor/build"
 

@@ -3,6 +3,8 @@
   "productName": "ElectronPlayer",
   "version": "0.0.1",
   "description": "ElectronPlayer: a music player built on the Audacious engine and its plugins",
+  "homepage": "https://audacious-media-player.org",
+  "desktopName": "electronplayer.desktop",
   "main": "dist/main/main.js",
   "private": true,
   "license": "UNLICENSED",
@@ -15,7 +17,10 @@
     "icon": "electron scripts/make-icon.cjs",
     "dist:mac": "bash scripts/package-mac.sh",
     "dist:mac:x64": "bash scripts/package-mac.sh x64",
-    "dist:mac:arm64": "bash scripts/package-mac.sh arm64"
+    "dist:mac:arm64": "bash scripts/package-mac.sh arm64",
+    "dist:other": "bash scripts/package-other.sh",
+    "dist:linux": "bash scripts/package-other.sh linux-x64 linux-arm64",
+    "dist:win": "bash scripts/package-other.sh win-x64 win-arm64"
   },
   "devDependencies": {
     "@sendspin/sendspin-js": "5.0.0",
@@ -37,28 +42,6 @@
       "!dist/**/*.map",
       "package.json"
     ],
-    "extraFiles": [
-      {
-        "from": "build/stage/${arch}/ElectronPlayer.app/Contents/Frameworks/engine",
-        "to": "Frameworks/engine",
-        "filter": [
-          "**/*",
-          "!*.dylib.dSYM"
-        ]
-      },
-      {
-        "from": "build/stage/${arch}/ElectronPlayer.app/Contents/Resources/engine",
-        "to": "Resources/engine",
-        "filter": [
-          "locale/**",
-          "audacious/**"
-        ]
-      },
-      {
-        "from": "NOTICE",
-        "to": "Resources/NOTICE"
-      }
-    ],
     "asar": true,
     "npmRebuild": false,
     "mac": {
@@ -70,11 +53,94 @@
       "icon": "resources/icon.icns",
       "identity": null,
       "hardenedRuntime": false,
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "extraFiles": [
+        {
+          "from": "build/stage/${arch}/ElectronPlayer.app/Contents/Frameworks/engine",
+          "to": "Frameworks/engine",
+          "filter": [
+            "**/*",
+            "!*.dylib.dSYM"
+          ]
+        },
+        {
+          "from": "build/stage/${arch}/ElectronPlayer.app/Contents/Resources/engine",
+          "to": "Resources/engine",
+          "filter": [
+            "locale/**",
+            "audacious/**"
+          ]
+        }
+      ]
     },
     "afterPack": "scripts/adhoc-sign.cjs",
     "dmg": {
       "title": "ElectronPlayer"
+    },
+    "extraResources": [
+      {
+        "from": "NOTICE",
+        "to": "NOTICE"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ],
+      "category": "Audio",
+      "executableName": "electronplayer",
+      "icon": "resources/icon.png",
+      "synopsis": "Music player built on the Audacious engine",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "extraFiles": [
+        {
+          "from": "build/stage/linux-${arch}/app/engine",
+          "to": "engine"
+        }
+      ],
+      "maintainer": "ElectronPlayer contributors",
+      "syncDesktopName": true
+    },
+    "deb": {
+      "artifactName": "${name}_${version}_${arch}.${ext}",
+      "depends": [
+        "libgtk-3-0 | libgtk-3-0t64",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0 | libatspi2.0-0t64",
+        "libuuid1",
+        "libsecret-1-0",
+        "libasound2 | libasound2t64",
+        "libglib2.0-0 | libglib2.0-0t64",
+        "libgnutls30 | libgnutls30t64"
+      ],
+      "recommends": [
+        "pulseaudio | pipewire-pulse | pipewire"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "resources/icon.png",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "extraFiles": [
+        {
+          "from": "build/stage/win-${arch}/app/engine",
+          "to": "engine"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
     }
   }
 }

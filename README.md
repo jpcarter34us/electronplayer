@@ -16,6 +16,7 @@ The approach, the per-plugin porting matrix and the roadmap are in [docs/PORTING
 | `src/shared/` | Types shared by main and renderer: `AudBackend` (`backend.ts`) and settings widget trees (`prefs.ts`) |
 | `src/main/` | Electron main process: native loader, menu bar (`menu.ts`), secondary windows (`windows.ts`), Touch Bar controls (`touchbar.ts`) |
 | `src/preload/` | `contextBridge` API exposed to the UI |
+| `docker/`, `patches/` | Build containers for the Linux and Windows packages; patches applied to `vendor/` by `scripts/apply-patches.sh` |
 | `resources/` | App icon: `icon.svg` (source), `icon.icns` and `icon.png` (made by `npm run icon`) |
 | `src/renderer/` | UI. `backends/native.ts` talks to libaudcore over IPC; `backends/html5.ts` is the fallback when the addon isn't built. Settings (`settings.ts`), plugin settings (`prefs.ts`, drawn by `prefs-form.ts`), Equalizer (`equalizer.ts`) and visualizers (`visualizers.ts`). |
 
@@ -55,7 +56,7 @@ This builds both architectures into `release/`:
 For one architecture only, run `npm run dist:mac:arm64` or `npm run dist:mac:x64`. Prerequisites are the same as for building the engine from source: Xcode command line tools, Homebrew, and the packages listed in `scripts/build-audacious.sh`. `scripts/package-mac.sh` runs these steps for each architecture:
 
 1. Builds the TypeScript and the renderer bundles.
-2. `scripts/build-engine-bundle.sh <arch>` builds libaudcore, the plugins and the native addon again, laid out as they sit inside the app (`Contents/Frameworks/engine`). libaudcore's own install-path relocation then finds its plugins in whichever `.app` it runs from, with no patch to Audacious.
+2. `scripts/build-engine-bundle.sh <arch>` builds libaudcore, the plugins and the native addon again, laid out as they sit inside the app (`Contents/Frameworks/engine`). libaudcore's own install-path relocation then finds its plugins in whichever `.app` it runs from, with no change to Audacious's path code.
 3. `scripts/bundle-dylibs.py` copies the Homebrew libraries the plugins use (about 40 of them, 50–70 MB) into `Frameworks/engine/deps` and repoints every reference to `@executable_path/…`. The build fails if anything still points outside the app, or if any file is not built for the target architecture.
 4. electron-builder assembles the app, with its minimum macOS set to the newest that any bundled library needs. `scripts/adhoc-sign.cjs` signs it ad hoc.
 
@@ -73,6 +74,37 @@ What the build is:
 - **Keychain prompt.** The first time the app saves a sign-in (Music Assistant or Subsonic), macOS asks to let ElectronPlayer use its "ElectronPlayer Safe Storage" key. Choose **Always Allow**. Because each ad-hoc build has a new signature, a rebuilt app may ask again.
 - **App icon.** `resources/icon.svg` is the source. After editing it, run `npm run icon` to regenerate `resources/icon.png` (the dock icon when running with `npm start`) and `resources/icon.icns` (the app's icon). Electron renders the SVG, so no extra tools are needed.
 - The SID plugin looks for optional C64 ROM files and a song-length database at a fixed build-time path, so it can't find them in the app (as before, without them SID files still play).
+
+## Building for Linux and Windows
+
+```bash
+npm run dist:other      # all four; or npm run dist:linux / npm run dist:win
+```
+
+This builds, in `release/`:
+
+| | x64 | arm64 |
+|---|---|---|
+| Linux | `ElectronPlayer-<version>-linux-x86_64.AppImage`, `electronplayer_<version>_amd64.deb`, `-linux-x64.tar.gz` | `-linux-arm64.AppImage`, `electronplayer_<version>_arm64.deb`, `-linux-arm64.tar.gz` |
+| Windows | `ElectronPlayer-Setup-<version>-x64.exe` (installer), `-win-x64.zip` | `ElectronPlayer-Setup-<version>-arm64.exe`, `-win-arm64.zip` |
+
+It needs only Docker. On a Mac: `brew install colima docker`, then `colima start --cpu 6 --memory 12 --disk 100 --vm-type vz`. Everything else runs in containers made from `docker/Dockerfile` (built on first use, about 5 GB). The first full run takes about an hour, later runs a few minutes per target. `scripts/package-other.sh` runs these steps for each target:
+
+1. Builds the TypeScript and the renderer bundles (on the host).
+2. `scripts/build-engine-other.sh <target>` (in a container) builds a small audio-only FFmpeg, libaudcore, the plugins and the native addon, laid out as they sit next to the app's executable (`engine/`, plugins in `engine/audacious/`). As on macOS, libaudcore relocates its paths from the executable, so this works wherever the app is installed or the AppImage is mounted.
+   - **Linux** is built on Debian 12 (glibc 2.36), so it runs on distributions from about 2022 on: Ubuntu 22.04+, Debian 12+, Fedora 37+ and so on. x64 is native; arm64 is cross-compiled with Debian's arm64 libraries.
+   - **Windows** is cross-compiled with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) against MSYS2's prebuilt libraries (`scripts/fetch-msys2-deps.py`, which downloads them with checksums). The addon is compiled directly, since node-gyp cannot target Windows from Linux.
+3. `scripts/bundle-libs-other.py` copies the libraries the plugins use into `engine/`. On Linux, libraries every desktop has and Electron itself loads (glib, ALSA/PulseAudio/PipeWire, GnuTLS, X11) are left to the system; everything resolves through `$ORIGIN` RUNPATHs. On Windows, the addon adds `engine\` to the DLL search path.
+4. electron-builder packages it (in the Windows container, which has Wine for the NSIS installer).
+
+Plugins: the same set as macOS. Linux adds ALSA, PulseAudio, PipeWire and JACK output and MPRIS (desktop media keys and widgets); Windows uses waveOut. Two changes to Audacious were needed, kept in `patches/audacious/` and applied automatically:
+- In headless mode libaudcore runs its main loop on its own GLib context. On Linux, Chromium's UI thread runs on GLib's default context, and sharing it crashed the app at start. The macOS build uses the same code.
+- With clang on Windows, every symbol is exported instead of marking exports per function (clang rejects Audacious's mix of plain declarations and `dllexport` definitions, which GCC accepts).
+
+What the builds are:
+- **Unsigned.** Windows SmartScreen warns about an unknown publisher the first time ("More info", then "Run anyway").
+- **Tested:** the Linux x64 `.deb` was installed on a clean Ubuntu 24.04 container and played WAV, MP3, FLAC and Ogg through PulseAudio, with every plugin found and every engine library loaded from the app. Not run here: the arm64 packages and the Windows builds (see `docs/PORTING_PLAN.md`).
+- `scripts/package-other.sh` turns off the Docker VM's `qemu-i386` handler if it is on: on an x86_64 VM it hijacks 32-bit programs (the NSIS stub under Wine) and makes them crawl. Restarting the VM turns it back on.
 
 ## Touch Bar
 

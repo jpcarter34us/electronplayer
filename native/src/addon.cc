@@ -25,6 +25,12 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 #include <libaudcore/audstrings.h>
 #include <libaudcore/drct.h>
 #include <libaudcore/equalizer.h>
@@ -333,10 +339,34 @@ static void vis_stop ();
 static const char * const playlist_hooks[] = {
     "playlist update", "playlist activate", "playlist position", "playlist set playing"};
 
+#ifdef _WIN32
+// Plugins load their own libraries (FLAC, FFmpeg, ...), which sit next to
+// libaudcore rather than next to the executable, so add this module's folder
+// to the DLL search path.
+static void add_engine_dll_dir ()
+{
+    HMODULE self = nullptr;
+    wchar_t path[MAX_PATH];
+    if (!GetModuleHandleExW (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             (LPCWSTR) add_engine_dll_dir, &self) ||
+        !GetModuleFileNameW (self, path, MAX_PATH))
+        return;
+    if (wchar_t * slash = wcsrchr (path, L'\\'))
+        *slash = 0;
+    SetDllDirectoryW (path);
+}
+#endif
+
 static void engine_main (std::string config_home, std::promise<void> * ready)
 {
     // Keep our config and playlists apart from a regular Audacious install.
+#ifdef _WIN32
+    add_engine_dll_dir ();
+    _putenv_s ("XDG_CONFIG_HOME", config_home.c_str ());
+#else
     setenv ("XDG_CONFIG_HOME", config_home.c_str (), 1);
+#endif
 
     aud_init_i18n ();
     aud_set_headless_mode (true);

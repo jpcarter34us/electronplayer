@@ -1,0 +1,118 @@
+libaudcore: run the headless main loop on a private GLib context
+
+In headless mode, libaudcore may share the process with a host that runs
+its own GLib loop on the default main context. Electron does on Linux
+(Chromium's UI thread), and the two loops on one context crash the app.
+Use a private context in headless mode, made thread-default on the thread
+that calls aud_init so GIO callbacks are dispatched by libaudcore's loop.
+The GTK/Qt applications keep using the default context.
+
+diff --git a/src/libaudcore/internal.h b/src/libaudcore/internal.h
+index 5aa0917..2cb84e5 100644
+--- a/src/libaudcore/internal.h
++++ b/src/libaudcore/internal.h
+@@ -102,6 +102,7 @@ bool iface_plugin_set_current(PluginHandle * plugin);
+ void interface_run();
+ 
+ /* mainloop.cc */
++void mainloop_init();
+ void mainloop_cleanup();
+ 
+ /* playback.cc */
+diff --git a/src/libaudcore/mainloop.cc b/src/libaudcore/mainloop.cc
+index e2193fb..a0fdf84 100644
+--- a/src/libaudcore/mainloop.cc
++++ b/src/libaudcore/mainloop.cc
+@@ -152,7 +152,24 @@ void QueuedFuncHelper::run()
+         params.func();
+ }
+ 
+-// GLib implementation -- simple wrapper around g_timeout_add_full()
++// GLib implementation -- a timeout source on the engine's main context
++
++// Headless, libaudcore may share the process with a host that runs its own
++// GLib loop on the default context (Electron does on Linux), so it uses a
++// private context instead, made thread-default on the main thread so GIO
++// callbacks (GDBus in mpris2, ...) are dispatched there too.
++static GMainContext * glib_context;
++
++void mainloop_init()
++{
++    if (aud_get_headless_mode())
++    {
++        glib_context = g_main_context_new();
++        g_main_context_push_thread_default(glib_context);
++    }
++    else
++        glib_context = g_main_context_ref(g_main_context_default());
++}
+ 
+ class HelperGLib : public QueuedFuncHelper
+ {
+@@ -160,15 +177,19 @@ public:
+     HelperGLib(QueuedFunc * queued, const QueuedFuncParams & params)
+         : QueuedFuncHelper(queued, params)
+     {
+-        glib_source =
+-            g_timeout_add_full(G_PRIORITY_HIGH, params.interval_ms, run_cb,
+-                               this, aud::delete_obj<HelperGLib>);
++        glib_source = g_timeout_source_new(params.interval_ms);
++        g_source_set_priority(glib_source, G_PRIORITY_HIGH);
++        g_source_set_callback(glib_source, run_cb, this,
++                              aud::delete_obj<HelperGLib>);
++        g_source_attach(glib_source, glib_context);
+     }
+ 
+     void cancel()
+     {
+         // GLib will delete the helper after we return to the main loop
+-        g_source_remove(glib_source);
++        GSource * source = glib_source;
++        g_source_destroy(source);
++        g_source_unref(source);
+     }
+ 
+ private:
+@@ -178,7 +199,7 @@ private:
+         return G_SOURCE_CONTINUE;
+     }
+ 
+-    int glib_source = 0;
++    GSource * glib_source;
+ };
+ 
+ #ifdef USE_QT
+@@ -370,7 +391,7 @@ EXPORT void mainloop_run()
+     else
+ #endif
+     {
+-        glib_mainloop = g_main_loop_new(nullptr, true);
++        glib_mainloop = g_main_loop_new(glib_context, true);
+         g_main_loop_run(glib_mainloop);
+         g_main_loop_unref(glib_mainloop);
+         glib_mainloop = nullptr;
+@@ -399,4 +420,12 @@ void mainloop_cleanup()
+         delete qApp;
+     }
+ #endif
++
++    if (glib_context)
++    {
++        if (aud_get_headless_mode())
++            g_main_context_pop_thread_default(glib_context);
++        g_main_context_unref(glib_context);
++        glib_context = nullptr;
++    }
+ }
+diff --git a/src/libaudcore/runtime.cc b/src/libaudcore/runtime.cc
+index 9f5af5f..c14f310 100644
+--- a/src/libaudcore/runtime.cc
++++ b/src/libaudcore/runtime.cc
+@@ -316,6 +316,7 @@ EXPORT void aud_init()
+ #endif
+     }
+ 
++    mainloop_init();
+     chardet_init();
+     eq_init();
+     output_init();

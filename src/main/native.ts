@@ -39,10 +39,14 @@ export interface NativeCore {
  * falls back to the HTML5 backend.
  */
 export function loadNativeCore(configHome: string, onEvent: (event: BackendEvent) => void): NativeCore {
-  // Packaged: Contents/Frameworks/engine (scripts/package-mac.sh). From source: native/build.
-  const addonPath = app.isPackaged
-    ? path.join(process.resourcesPath, '..', 'Frameworks', 'engine', 'audcore.node')
-    : path.join(__dirname, '../../native/build/Release/audcore.node');
+  // Packaged: Contents/Frameworks/engine on macOS (scripts/package-mac.sh),
+  // engine/ next to the executable elsewhere (scripts/package-other.sh).
+  // From source: native/build.
+  const addonPath = !app.isPackaged
+    ? path.join(__dirname, '../../native/build/Release/audcore.node')
+    : process.platform === 'darwin'
+      ? path.join(process.resourcesPath, '..', 'Frameworks', 'engine', 'audcore.node')
+      : path.join(path.dirname(process.execPath), 'engine', 'audcore.node');
   let addon: Addon;
   try {
     addon = require(addonPath);

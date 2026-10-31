@@ -21,6 +21,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+bash "$root/scripts/apply-patches.sh"
 host_arch=$([[ "$(uname -m)" == arm64 ]] && echo arm64 || echo x64)
 arch="${1:-$host_arch}"
 [[ "$arch" == x64 || "$arch" == arm64 ]] || { echo "unknown arch: $arch" >&2; exit 1; }
