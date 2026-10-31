@@ -1,0 +1,5 @@
+# Keep LF line endings on every checkout, Windows included: the build scripts
+# run under bash and in Linux containers, where CRLF breaks them.
+* text=auto eol=lf
+*.png binary
+*.icns binary
