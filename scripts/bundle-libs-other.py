@@ -14,6 +14,10 @@ Linux: libraries every desktop already has, and that Electron itself loads
 engine uses the same copy as the rest of the process. RUNPATHs are set so
 everything resolves inside the engine folder. Windows: plugins find their
 DLLs through the folder the addon adds to the DLL search path.
+
+BUNDLE_LIB_DIRS (os.pathsep-separated) adds library folders to search, and
+OBJDUMP and STRIP name the tools; build-engine-windows.sh sets them for
+MSYS2's GCC toolchain.
 """
 import os
 import re
@@ -40,6 +44,7 @@ if windows:
     triple = ('aarch64' if arm else 'x86_64') + '-w64-mingw32'
     search = [os.path.join(deps, 'ffmpeg', 'bin'), os.path.join(deps, 'msys2', repo, 'bin'),
               f'/opt/llvm-mingw/{triple}/bin']
+    search += [d for d in os.environ.get('BUNDLE_LIB_DIRS', '').split(os.pathsep) if d]
 else:
     triple = 'aarch64-linux-gnu' if arm else 'x86_64-linux-gnu'
     search = [os.path.join(deps, 'ffmpeg', 'lib'), f'/usr/lib/{triple}', f'/lib/{triple}']
@@ -49,7 +54,7 @@ else:
 
 def needed(path: str) -> list[str]:
     if windows:
-        out = subprocess.run(['llvm-objdump', '-p', path], capture_output=True, text=True).stdout
+        out = subprocess.run([os.environ.get('OBJDUMP', 'llvm-objdump'), '-p', path], capture_output=True, text=True).stdout
         return re.findall(r'DLL Name: (\S+)', out)
     out = subprocess.run(['readelf', '-d', path], capture_output=True, text=True).stdout
     return re.findall(r'\(NEEDED\)\s+Shared library: \[([^\]]+)\]', out)
@@ -112,7 +117,7 @@ while queue:
         copied.append(name)
         queue.append(dest)
 
-strip = 'llvm-strip' if windows else ('aarch64-linux-gnu-strip' if arm else 'strip')
+strip = os.environ.get('STRIP') or ('llvm-strip' if windows else ('aarch64-linux-gnu-strip' if arm else 'strip'))
 for dp, _, fs in os.walk(engine):
     for f in fs:
         path = os.path.join(dp, f)

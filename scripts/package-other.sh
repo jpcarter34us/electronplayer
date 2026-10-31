@@ -16,8 +16,8 @@ targets=("$@")
 [[ ${#targets[@]} -gt 0 ]] || targets=(linux-x64 linux-arm64 win-x64 win-arm64)
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    echo "On Windows, run this from WSL 2 (Ubuntu), in a clone inside the WSL file system (e.g. ~/electronplayer, not /mnt/c/...)," >&2
-    echo "with Docker Desktop's WSL integration turned on. Git Bash can't share this folder with the build containers." >&2
+    echo "On Windows, build the Windows package natively with: npm run dist:win:native (see README)." >&2
+    echo "For the Linux packages, run this from WSL 2 instead, with Docker Desktop's WSL integration on." >&2
     exit 1 ;;
 esac
 [[ "$root" != /mnt/[a-z]/* ]] || echo "Warning: building from a Windows drive ($root) is very slow, and symlinks may fail. Clone into the WSL file system instead." >&2

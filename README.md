@@ -88,7 +88,7 @@ This builds, in `release/`:
 | Linux | `ElectronPlayer-<version>-linux-x86_64.AppImage`, `electronplayer_<version>_amd64.deb`, `-linux-x64.tar.gz` | `-linux-arm64.AppImage`, `electronplayer_<version>_arm64.deb`, `-linux-arm64.tar.gz` |
 | Windows | `ElectronPlayer-Setup-<version>-x64.exe` (installer), `-win-x64.zip` | `ElectronPlayer-Setup-<version>-arm64.exe`, `-win-arm64.zip` |
 
-It needs only Docker. On a Mac: `brew install colima docker`, then `colima start --cpu 6 --memory 12 --disk 100 --vm-type vz`. On Windows, build from WSL 2: install Docker Desktop and turn on its WSL integration, then in an Ubuntu shell clone the repository into the WSL file system (`~/electronplayer`, not under `/mnt/c`), install Node.js there, and run `git submodule update --init --depth 1`, `npm install`, `(cd native && npm install --ignore-scripts)` (it only needs the headers; the container compiles the addon) and `npm run dist:win` from that shell. Git Bash and PowerShell are not supported: Git for Windows checks files out with CRLF line endings (which breaks the shell scripts and the Audacious submodules), and Docker can't mount the folder from Git Bash. Everything else runs in containers made from `docker/Dockerfile` (built on first use, about 5 GB). The first full run takes about an hour, later runs a few minutes per target. `scripts/package-other.sh` runs these steps for each target:
+It needs only Docker. On a Mac: `brew install colima docker`, then `colima start --cpu 6 --memory 12 --disk 100 --vm-type vz`. (To build the Windows package on a Windows PC without WSL or Docker, see [Building on Windows](#building-on-windows).) Everything else runs in containers made from `docker/Dockerfile` (built on first use, about 5 GB). The first full run takes about an hour, later runs a few minutes per target. `scripts/package-other.sh` runs these steps for each target:
 
 1. Builds the TypeScript and the renderer bundles (on the host).
 2. `scripts/build-engine-other.sh <target>` (in a container) builds a small audio-only FFmpeg, libaudcore, the plugins and the native addon, laid out as they sit next to the app's executable (`engine/`, plugins in `engine/audacious/`). As on macOS, libaudcore relocates its paths from the executable, so this works wherever the app is installed or the AppImage is mounted.
@@ -105,6 +105,26 @@ What the builds are:
 - **Unsigned.** Windows SmartScreen warns about an unknown publisher the first time ("More info", then "Run anyway").
 - **Tested:** the Linux x64 `.deb` was installed on a clean Ubuntu 24.04 container and played WAV, MP3, FLAC and Ogg through PulseAudio, with every plugin found and every engine library loaded from the app. Not run here: the arm64 packages and the Windows builds (see `docs/PORTING_PLAN.md`).
 - `scripts/package-other.sh` turns off the Docker VM's `qemu-i386` handler if it is on: on an x86_64 VM it hijacks 32-bit programs (the NSIS stub under Wine) and makes them crawl. Restarting the VM turns it back on.
+
+## Building on Windows
+
+On a Windows PC, the Windows package can be built natively, from PowerShell, with no WSL or Docker:
+
+```powershell
+winget install MSYS2.MSYS2      # once; the build installs the compilers and libraries it needs into it
+git submodule update --init --depth 1
+npm install
+cd native; npm install --ignore-scripts; cd ..
+npm run dist:win:native
+```
+
+It needs Node.js, Git and [MSYS2](https://www.msys2.org) (in `C:\msys64`, or set `MSYS2_ROOT`), and builds `release\ElectronPlayer-Setup-<version>-x64.exe` and `-win-x64.zip`. Visual Studio is not used. `scripts/package-win-native.mjs` runs these steps:
+
+1. Builds the TypeScript and the renderer bundles.
+2. `scripts/build-engine-windows.sh`, in MSYS2's UCRT64 environment, installs MinGW-w64 GCC and the plugins' libraries with `pacman` on first use, then builds the audio-only FFmpeg, libaudcore, the plugins and the native addon, and copies the DLLs they need into `build\stage\win-x64\app\engine`: the same layout as the container build. It builds from copies of the submodules with LF line endings, so a CRLF checkout doesn't matter. FFmpeg can't be built in a path with spaces, so if the repository is in one (as under `C:\Users\First Last`), the work happens in `C:\electronplayer-build` (or `EP_BUILD_DIR`).
+3. electron-builder packages it.
+
+The first run takes about half an hour, most of it FFmpeg and MSYS2's packages; later runs are incremental. If MSYS2 updates itself on the first run and stops, run it again. This builds x64 only (it also runs on Windows on Arm); the arm64 package needs the container build. Not yet tested on a Windows machine.
 
 ## Touch Bar
 

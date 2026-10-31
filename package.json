@@ -20,7 +20,8 @@
     "dist:mac:arm64": "bash scripts/package-mac.sh arm64",
     "dist:other": "bash scripts/package-other.sh",
     "dist:linux": "bash scripts/package-other.sh linux-x64 linux-arm64",
-    "dist:win": "bash scripts/package-other.sh win-x64 win-arm64"
+    "dist:win": "bash scripts/package-other.sh win-x64 win-arm64",
+    "dist:win:native": "node scripts/package-win-native.mjs"
   },
   "devDependencies": {
     "@sendspin/sendspin-js": "5.0.0",
