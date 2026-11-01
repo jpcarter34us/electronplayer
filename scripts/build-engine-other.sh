@@ -152,8 +152,9 @@ if [[ $os == linux ]]; then
   cp "$builds/native/build/Release/audcore.node" "$app/engine/audcore.node"
 else
   # node-gyp cannot target Windows from Linux, so compile it directly. N-API
-  # functions are exported by the Electron executable; node-gyp's delay-load
-  # hook points imports from "node.exe" at whatever executable loaded us.
+  # functions are exported by the Electron executable; the delay-load hook
+  # (native/src/win_delay_load_hook.cc) points imports from "node.exe" at
+  # whatever executable loaded us.
   headers="$root/build/cache/electron-headers-$electron"
   if [[ ! -d "$headers/include/node" ]]; then
     mkdir -p "$headers"
@@ -161,10 +162,9 @@ else
   fi
   nodelib="$headers/win-$arch-node.lib"
   [[ -f "$nodelib" ]] || curl -fsSL -o "$nodelib" "https://electronjs.org/headers/v$electron/win-$arch/node.lib"
-  hook="$root/native/node_modules/node-gyp/src/win_delay_load_hook.cc"
-  $cxx -shared -O2 -std=c++17 -DNAPI_VERSION=9 -DNAPI_DISABLE_CPP_EXCEPTIONS -DBUILDING_NODE_EXTENSION -DHOST_BINARY=\"node.exe\" \
+  $cxx -shared -O2 -std=c++17 -DNAPI_VERSION=9 -DNAPI_DISABLE_CPP_EXCEPTIONS -DBUILDING_NODE_EXTENSION \
     -I"$napi_inc" -I"$headers/include/node" -I"$app/include" \
-    "$root/native/src/addon.cc" "$hook" -o "$app/engine/audcore.node" \
+    "$root/native/src/addon.cc" "$root/native/src/win_delay_load_hook.cc" -o "$app/engine/audcore.node" \
     -L"$app/engine" -laudcore "$nodelib" -Wl,--delayload=node.exe -ldelayimp -static-libgcc
 fi
 
